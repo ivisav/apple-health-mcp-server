@@ -139,6 +139,12 @@ class XMLExporter:
         workouts: list[dict[str, Any]] = []
         workout_stats: list[dict[str, Any]] = []
         pending_stats: list[dict[str, Any]] = []
+        # Apple's export writes every food-<Correlation> member <Record> twice:
+        # once nested inside the <Correlation> and once again as a top-level
+        # <Record> with identical attributes. Only import the top-level copy
+        # (nested rows have a verified 1:1 top-level twin) so composite meals
+        # from MacroFactor/MyNetDiary/Yazio aren't double-counted.
+        correlation_depth = 0
 
         xml_source = source if source is not None else self.xml_path
         # Record's and WorkoutStatistics' own attributes are always complete
@@ -151,7 +157,13 @@ class XMLExporter:
         # emptied-out children. Buffer stats per-workout in pending_stats and
         # only commit them once the Workout's "end" tells us whether to keep it.
         for event, elem in ET.iterparse(xml_source, events=("start", "end")):
-            if event == "start" and elem.tag == "Record":
+            if elem.tag == "Correlation":
+                if event == "start":
+                    correlation_depth += 1
+                else:
+                    correlation_depth -= 1
+
+            elif event == "start" and elem.tag == "Record" and correlation_depth == 0:
                 if len(records) >= self.chunk_size:
                     yield pd.DataFrame(records).reindex(columns=self.RECORD_COLUMNS)
                     records = []

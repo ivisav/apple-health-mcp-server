@@ -17,6 +17,24 @@ def value_aggregates(table: str) -> list[str]:
     return ["value"]
 
 
+def normalized_source(expr: str) -> str:
+    """
+    Wrap a SQL expression (a column like ``sourceName`` or a quoted literal) so two
+    device names compare equal regardless of Unicode punctuation: fold curly
+    apostrophes (U+2018/U+2019) to ``'``, no-break / narrow-no-break spaces
+    (U+00A0/U+202F) to a normal space, then trim and lowercase.
+
+    Apple stores e.g. ``Igor’s Apple Watch`` (curly apostrophe + NBSP), so a
+    plain ``sourceName = 'Igor''s Apple Watch'`` never matches. Applied to BOTH
+    sides of the comparison.
+    """
+    return (
+        f"lower(trim(translate({expr}, "
+        f"chr(8217) || chr(8216) || chr(160) || chr(8239), "
+        f"chr(39) || chr(39) || chr(32) || chr(32))))"
+    )
+
+
 def get_table(record_type: str | list[str] | Any) -> str:
     types = record_type if isinstance(record_type, list) else [record_type]
     is_workout = [bool(t) and t.startswith("HKWorkout") for t in types]
@@ -85,7 +103,10 @@ def fill_query(params: HealthRecordSearchParams) -> str:
     if params.record_type:
         conditions.append(f" {type_filter(table, params.record_type)}")
     if params.source_name:
-        conditions.append(f" source_name = '{params.source_name}'")
+        literal = "'" + params.source_name.replace("'", "''") + "'"
+        conditions.append(
+            f" {normalized_source('sourceName')} = {normalized_source(literal)}",
+        )
     if params.date_from or params.date_to:
         conditions.append(build_date(params.date_from, params.date_to, table))
     if params.value_min or params.value_max:
