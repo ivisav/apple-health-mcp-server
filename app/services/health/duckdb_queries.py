@@ -16,6 +16,7 @@ from app.services.health.sql_helpers import (
     get_table,
     join_query,
     join_string,
+    normalized_source,
     type_filter,
     value_aggregates,
 )
@@ -41,6 +42,18 @@ def _get_con() -> duckdb.DuckDBPyConnection:
     if _con is None:
         _con = duckdb.connect(client.path, read_only=True)
     return _con
+
+
+def _source_name_filter(source_name: str | None) -> str:
+    """
+    ``AND <norm(sourceName)> = <norm($source_name)>`` (bound param), or ``""``.
+
+    Both sides go through ``normalized_source`` so a plain ``Igor's Apple Watch``
+    matches the ``Igor’s Apple\xa0Watch`` (curly apostrophe + NBSP) Apple stores.
+    """
+    if not source_name:
+        return ""
+    return f"AND {normalized_source('sourceName')} = {normalized_source('$source_name')}"
 
 
 @ttl_cache(**_default_cache)
@@ -88,6 +101,8 @@ def get_statistics_by_type_from_duckdb(
     if date_to:
         query_params["date_to"] = date_to
 
+    src_filter = _source_name_filter(source_name)
+
     value = values[0]
     for value in values:
         results.append(
@@ -97,7 +112,7 @@ def get_statistics_by_type_from_duckdb(
                     AVG({value}) AS average, SUM({value}) AS sum, MIN({value}) AS min,
                     MAX({value}) AS max, unit FROM {table} {join_clause}
                     WHERE {type_filter(table, record_type)}
-                    {"AND sourceName = $source_name" if source_name else ""}
+                    {src_filter}
                     {f"AND {table}.startDate >= $date_from" if date_from else ""}
                     {f"AND {table}.startDate <= $date_to" if date_to else ""}
                     GROUP BY {table}.type,
@@ -130,6 +145,8 @@ def get_trend_data_from_duckdb(
     if date_to:
         query_params["date_to"] = date_to
 
+    src_filter = _source_name_filter(source_name)
+
     for value in values:
         results.append(
             _get_con().sql(
@@ -140,7 +157,7 @@ def get_trend_data_from_duckdb(
             MIN({value}) AS min, MAX({value}) AS max, COUNT(*) AS count,
             unit FROM {table} {join_clause}
             WHERE {type_filter(table, record_type)}
-            {"AND sourceName = $source_name" if source_name else ""}
+            {src_filter}
             {f"AND {table}.startDate >= $date_from" if date_from else ""}
             {f"AND {table}.startDate <= $date_to" if date_to else ""}
             GROUP BY interval, {table}.type, sourceName, unit ORDER BY interval ASC
