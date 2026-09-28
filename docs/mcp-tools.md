@@ -40,6 +40,8 @@ The Apple Health MCP Server provides a suite of tools for exploring, searching, 
 | `search_health_records_duckdb`  | Flexible search for health records in DuckDB with advanced filtering and query options.        |
 | `get_statistics_by_type_duckdb` | Get comprehensive statistics (count, min, max, avg, sum) for a specific health record type.          |
 | `get_trend_data_duckdb`         | Analyze trends for a health record type over time (daily, weekly, monthly, yearly aggregations).     |
+| `get_sleep_summary_duckdb`      | Per-night sleep stage (Deep/Core/REM/Awake/In Bed) durations.          |
+| `get_blood_pressure_summary_duckdb` | Systolic + diastolic (+ heart rate) readings joined into one row per timestamp. |
 | `search_values_duckdb`          | Search for records with exactly matching values (including text).     |
 
 All tools are accessible via MCP-compatible clients and can be used with natural language or programmatic queries to explore and analyze your Apple Health data.

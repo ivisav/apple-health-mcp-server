@@ -20,6 +20,8 @@ RecordType = Literal[
     "HKQuantityTypeIdentifierWalkingStepLength",
     "HKQuantityTypeIdentifierWalkingSpeed",
     "HKQuantityTypeIdentifierEnvironmentalAudioExposure",
+    "HKQuantityTypeIdentifierBloodPressureSystolic",
+    "HKQuantityTypeIdentifierBloodPressureDiastolic",
 ]
 
 WorkoutType = Literal[

@@ -54,6 +54,7 @@ For Docker or Elasticsearch setups, see **[Getting Started](docs/getting-started
 | `get_statistics_by_type_duckdb` | count / min / max / avg / sum, filterable by source and dates |
 | `get_trend_data_duckdb` | Day / week / month / year aggregations |
 | `get_sleep_summary_duckdb` | Per-night Deep / Core / REM / Awake / In Bed minutes |
+| `get_blood_pressure_summary_duckdb` | Systolic + diastolic (+ heart rate) joined into one reading per timestamp |
 | `search_values_duckdb` | Exact value matches (including text) |
 | `log_fueling_event` / `search_fueling_events` / `delete_fueling_event` | Manual log of drinks, gels, bars, etc. |
 

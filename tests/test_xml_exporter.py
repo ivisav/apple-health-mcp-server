@@ -67,3 +67,51 @@ def test_correlation_nested_records_are_not_double_counted() -> None:
         "HKQuantityTypeIdentifierDietaryFatTotal",
         "HKQuantityTypeIdentifierStepCount",
     ]
+
+
+# Blood pressure readings follow the same shape: Apple wraps the systolic,
+# diastolic, and (often) heart-rate samples in a HKCorrelationTypeIdentifierBloodPressure
+# <Correlation>, and each member <Record> is duplicated as a top-level <Record>.
+BLOOD_PRESSURE_XML = b"""<HealthData>
+ <Record type="HKQuantityTypeIdentifierBloodPressureSystolic" sourceName="Withings"
+    unit="mmHg" creationDate="2026-08-05 08:00:10 +0000"
+    startDate="2026-08-05 08:00:00 +0000" endDate="2026-08-05 08:00:00 +0000" value="118"/>
+ <Record type="HKQuantityTypeIdentifierBloodPressureDiastolic" sourceName="Withings"
+    unit="mmHg" creationDate="2026-08-05 08:00:10 +0000"
+    startDate="2026-08-05 08:00:00 +0000" endDate="2026-08-05 08:00:00 +0000" value="76"/>
+ <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Withings"
+    unit="count/min" creationDate="2026-08-05 08:00:10 +0000"
+    startDate="2026-08-05 08:00:00 +0000" endDate="2026-08-05 08:00:00 +0000" value="62"/>
+ <Correlation type="HKCorrelationTypeIdentifierBloodPressure" sourceName="Withings"
+    creationDate="2026-08-05 08:00:10 +0000"
+    startDate="2026-08-05 08:00:00 +0000" endDate="2026-08-05 08:00:00 +0000">
+  <Record type="HKQuantityTypeIdentifierBloodPressureSystolic" sourceName="Withings"
+    unit="mmHg" creationDate="2026-08-05 08:00:10 +0000"
+    startDate="2026-08-05 08:00:00 +0000" endDate="2026-08-05 08:00:00 +0000" value="118"/>
+  <Record type="HKQuantityTypeIdentifierBloodPressureDiastolic" sourceName="Withings"
+    unit="mmHg" creationDate="2026-08-05 08:00:10 +0000"
+    startDate="2026-08-05 08:00:00 +0000" endDate="2026-08-05 08:00:00 +0000" value="76"/>
+  <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Withings"
+    unit="count/min" creationDate="2026-08-05 08:00:10 +0000"
+    startDate="2026-08-05 08:00:00 +0000" endDate="2026-08-05 08:00:00 +0000" value="62"/>
+ </Correlation>
+</HealthData>"""
+
+
+def test_blood_pressure_correlation_nested_records_are_not_double_counted() -> None:
+    exporter = XMLExporter.__new__(XMLExporter)
+    exporter.chunk_size = 50000
+    exporter.cutoff_date = None
+
+    frames = list(exporter.parse_xml(source=io.BytesIO(BLOOD_PRESSURE_XML)))
+    records = next(
+        df for df in frames if set(df.columns) == set(exporter.RECORD_COLUMNS) and len(df)
+    )
+
+    # Only the three top-level <Record>s, not the <Correlation>-nested duplicates.
+    assert len(records) == 3
+    assert sorted(records["type"]) == [
+        "HKQuantityTypeIdentifierBloodPressureDiastolic",
+        "HKQuantityTypeIdentifierBloodPressureSystolic",
+        "HKQuantityTypeIdentifierHeartRate",
+    ]
