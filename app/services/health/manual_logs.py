@@ -1,8 +1,9 @@
-import atexit
+import contextlib
 import json
 import os
 import sys
 import threading
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +14,6 @@ from app.schemas.manual_log import FuelingCategory
 from app.services.duckdb_client import DuckDBClient
 
 client = DuckDBClient(path=settings.LOGS_DUCKDB_FILENAME)
-_con: duckdb.DuckDBPyConnection | None = None
 _lock = threading.Lock()
 
 FUELING_EVENTS_SCHEMA = """
@@ -35,12 +35,21 @@ FUELING_EVENTS_SCHEMA = """
 """
 
 
-def _get_con() -> duckdb.DuckDBPyConnection:
-    global _con
-    if _con is None:
-        _con = duckdb.connect(str(client.path))
-        _con.sql(FUELING_EVENTS_SCHEMA)
-    return _con
+@contextlib.contextmanager
+def _connect() -> Iterator[duckdb.DuckDBPyConnection]:
+    """Open a short-lived connection to the manual-logs DB and always close it
+    before returning. Each session/skill may run in its own container
+    sharing the same bind-mounted data/ dir, and DuckDB takes an exclusive
+    lock for as long as a read-write connection stays open — so the
+    connection must not outlive a single call, or other sessions can't
+    open the file until this one exits.
+    """
+    con = duckdb.connect(str(client.path))
+    try:
+        con.sql(FUELING_EVENTS_SCHEMA)
+        yield con
+    finally:
+        con.close()
 
 
 def _json_mirror_path() -> Path:
@@ -80,21 +89,6 @@ def _persist(con: duckdb.DuckDBPyConnection) -> None:
         print(f"manual_logs: failed to write JSON mirror: {e}", file=sys.stderr)
 
 
-def close_con() -> None:
-    """Checkpoint and close the module connection (graceful shutdown / atexit)."""
-    global _con
-    with _lock:
-        if _con is not None:
-            try:
-                _con.execute("CHECKPOINT")
-            finally:
-                _con.close()
-                _con = None
-
-
-atexit.register(close_con)
-
-
 def log_fueling_event(
     product_name: str,
     category: FuelingCategory,
@@ -108,8 +102,7 @@ def log_fueling_event(
     notes: str | None = None,
     logged_at: str | None = None,
 ) -> dict[str, Any]:
-    with _lock:
-        con = _get_con()
+    with _lock, _connect() as con:
         result = con.execute(
             """
             INSERT INTO fueling_events (
@@ -140,8 +133,7 @@ def log_fueling_event(
 
 
 def delete_fueling_event(id: str) -> dict[str, Any]:
-    with _lock:
-        con = _get_con()
+    with _lock, _connect() as con:
         result = con.execute(
             "DELETE FROM fueling_events WHERE id = ?::UUID RETURNING *",
             [id],
@@ -159,8 +151,7 @@ def search_fueling_events(
     category: FuelingCategory | None = None,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
-    with _lock:
-        con = _get_con()
+    with _lock, _connect() as con:
         query = "SELECT * FROM fueling_events WHERE 1=1"
         params: list[Any] = []
         if date_from:

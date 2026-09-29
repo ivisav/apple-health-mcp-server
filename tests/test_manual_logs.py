@@ -1,5 +1,7 @@
 import json
 import shutil
+import subprocess
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -25,11 +27,7 @@ def _rows_without_wal(db_path: Path, tmp_path: Path) -> list[tuple]:
 def temp_logs_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     db_path = tmp_path / "manual_logs.duckdb"
     monkeypatch.setattr(manual_logs.client, "path", db_path)
-    manual_logs._con = None
     yield db_path
-    if manual_logs._con is not None:
-        manual_logs._con.close()
-    manual_logs._con = None
 
 
 def test_log_fueling_event_creates_table_and_row() -> None:
@@ -165,10 +163,55 @@ def test_json_mirror_reflects_deletes(temp_logs_db: Path) -> None:
     assert [r["product_name"] for r in data] == ["Stays"]
 
 
-def test_close_con_checkpoints_and_resets(temp_logs_db: Path, tmp_path: Path) -> None:
-    manual_logs.log_fueling_event(product_name="Flushed", category="gel")
+def test_log_fueling_event_releases_lock_for_another_process(
+    temp_logs_db: Path,
+) -> None:
+    """The bug: another OS process (e.g. a different skill's MCP container)
+    must be able to open the same DB file immediately after a write, not
+    have to wait for this process to exit."""
+    manual_logs.log_fueling_event(product_name="Test Gel", category="gel")
 
-    manual_logs.close_con()
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import duckdb, sys\n"
+            "con = duckdb.connect(sys.argv[1])\n"
+            "print(con.execute('SELECT product_name FROM fueling_events').fetchall())\n"
+            "con.close()\n",
+            str(temp_logs_db),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
 
-    assert manual_logs._con is None
-    assert _rows_without_wal(temp_logs_db, tmp_path) == [("Flushed",)]
+    assert result.returncode == 0, result.stderr
+    assert "Test Gel" in result.stdout
+
+
+def test_search_fueling_events_releases_lock_for_another_process(
+    temp_logs_db: Path,
+) -> None:
+    """Same as above but for the read path — the reported symptom explicitly
+    called out other skills failing to *read* after fueling-logger ran."""
+    manual_logs.log_fueling_event(product_name="Read Gel", category="gel")
+    manual_logs.search_fueling_events()
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import duckdb, sys\n"
+            "con = duckdb.connect(sys.argv[1])\n"
+            "print(con.execute('SELECT product_name FROM fueling_events').fetchall())\n"
+            "con.close()\n",
+            str(temp_logs_db),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Read Gel" in result.stdout
