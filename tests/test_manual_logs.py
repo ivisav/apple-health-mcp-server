@@ -188,3 +188,30 @@ def test_log_fueling_event_releases_lock_for_another_process(
 
     assert result.returncode == 0, result.stderr
     assert "Test Gel" in result.stdout
+
+
+def test_search_fueling_events_releases_lock_for_another_process(
+    temp_logs_db: Path,
+) -> None:
+    """Same as above but for the read path — the reported symptom explicitly
+    called out other skills failing to *read* after fueling-logger ran."""
+    manual_logs.log_fueling_event(product_name="Read Gel", category="gel")
+    manual_logs.search_fueling_events()
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import duckdb, sys\n"
+            "con = duckdb.connect(sys.argv[1])\n"
+            "print(con.execute('SELECT product_name FROM fueling_events').fetchall())\n"
+            "con.close()\n",
+            str(temp_logs_db),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Read Gel" in result.stdout
