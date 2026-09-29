@@ -1,4 +1,5 @@
 import logging
+import math
 from typing import Any
 
 import duckdb
@@ -183,6 +184,52 @@ def get_sleep_summary_from_duckdb(
         GROUP BY night, stage ORDER BY night DESC, stage
     """)
     return client.format_response(result)
+
+
+@ttl_cache(**_default_cache)
+def get_blood_pressure_summary_from_duckdb(
+    date_from: str | None = None,
+    date_to: str | None = None,
+    source_name: str | None = None,
+) -> list[dict[str, Any]]:
+    query_params: dict[str, Any] = {}
+    if source_name:
+        query_params["source_name"] = source_name
+    if date_from:
+        query_params["date_from"] = date_from
+    if date_to:
+        query_params["date_to"] = date_to
+
+    src_filter = _source_name_filter(source_name).replace("sourceName", "sys.sourceName")
+
+    result = _get_con().sql(
+        f"""
+            SELECT sys.startDate AS date, sys.sourceName AS source,
+            sys.value AS systolic, dia.value AS diastolic, hr.value AS heart_rate
+            FROM records sys
+            JOIN records dia
+                ON sys.startDate = dia.startDate
+                AND {normalized_source("sys.sourceName")} = {normalized_source("dia.sourceName")}
+                AND dia.type = 'HKQuantityTypeIdentifierBloodPressureDiastolic'
+            LEFT JOIN records hr
+                ON hr.startDate = sys.startDate
+                AND {normalized_source("sys.sourceName")} = {normalized_source("hr.sourceName")}
+                AND hr.type = 'HKQuantityTypeIdentifierHeartRate'
+            WHERE sys.type = 'HKQuantityTypeIdentifierBloodPressureSystolic'
+            {src_filter}
+            {"AND sys.startDate >= $date_from" if date_from else ""}
+            {"AND sys.startDate <= $date_to" if date_to else ""}
+            ORDER BY sys.startDate DESC
+        """,
+        params=query_params,
+    )
+    rows = client.format_response(result)
+    for row in rows:
+        # The LEFT JOIN leaves unmatched heart_rate as NaN (via pandas), not
+        # None/NULL — normalize it so callers get valid JSON.
+        if isinstance(row.get("heart_rate"), float) and math.isnan(row["heart_rate"]):
+            row["heart_rate"] = None
+    return rows
 
 
 @ttl_cache(

@@ -4,6 +4,7 @@ from fastmcp import FastMCP
 
 from app.schemas.record import HealthRecordSearchParams, IntervalType, RecordType, WorkoutType
 from app.services.health.duckdb_queries import (
+    get_blood_pressure_summary_from_duckdb,
     get_health_summary_from_duckdb,
     get_sleep_summary_from_duckdb,
     get_statistics_by_type_from_duckdb,
@@ -309,6 +310,54 @@ def get_sleep_summary_duckdb(
         return get_sleep_summary_from_duckdb(date_from, date_to)
     except Exception as e:
         return [{"error": f"Failed to get sleep summary: {str(e)}"}]
+
+
+@duckdb_reader_router.tool
+def get_blood_pressure_summary_duckdb(
+    date_from: str | None = None,
+    date_to: str | None = None,
+    source_name: str | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Get blood pressure readings from DuckDB, with each reading's systolic,
+    diastolic, and (if recorded) heart rate joined into a single row.
+
+    Parameters:
+    - date_from, date_to: Optional ISO8601 date strings for filtering date range.
+    - source_name: Optional — restrict to one device/app (e.g. "Withings").
+
+    Returns a list of rows, one per reading, each with:
+    - date: When the reading was taken
+    - source: The device/app that recorded it
+    - systolic: Systolic pressure (mmHg)
+    - diastolic: Diastolic pressure (mmHg)
+    - heart_rate: Heart rate recorded alongside the reading (bpm), or null if
+      none was recorded at that same timestamp/source
+
+    Notes for LLMs:
+    - Use this instead of get_statistics_by_type_duckdb/get_trend_data_duckdb/
+      search_health_records_duckdb for blood pressure: those tools return
+      "HKQuantityTypeIdentifierBloodPressureSystolic" and
+      "...Diastolic" as separate, unlinked rows — this tool joins them into
+      one reading per timestamp so systolic/diastolic pairs aren't split apart.
+    - A reading only appears here if BOTH a systolic and diastolic sample exist
+      for the same timestamp/source — an unmatched systolic-only or
+      diastolic-only row (e.g. a partial sync) is silently excluded.
+    - Do not guess, autofill, or assume any missing data.
+    - If there are multiple databases available (DuckDB, Elasticsearch):
+      first, ask the user which one he wants to use. DO NOT call any tools before
+      the user specifies his intent.
+    - If the user decides on an option, only use tools from this database,
+      do not switch over to another until the user specifies that he wants
+      to use a different one. You do not have to keep asking whether
+      the user wants to use the same database that he used before.
+    - If there is only one database available (DuckDB, Elasticsearch):
+      you can use the tools from this database without the user specifying it.
+    """
+    try:
+        return get_blood_pressure_summary_from_duckdb(date_from, date_to, source_name)
+    except Exception as e:
+        return [{"error": f"Failed to get blood pressure summary: {str(e)}"}]
 
 
 @duckdb_reader_router.tool
