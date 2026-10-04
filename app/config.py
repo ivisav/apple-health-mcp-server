@@ -1,10 +1,8 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import AnyHttpUrl, field_validator
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-from app.utils.config_utils import EnvironmentType
 
 _PROJECT_ROOT = Path(__file__).parent.parent
 
@@ -15,17 +13,6 @@ _REMOTE_DB_PREFIXES = ("localhost", "http://", "https://")
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "MCP Server"
-    API_V1_STR: str = "/api/v1"
-    VERSION: str = "0.0.1"
-
-    DEBUG: bool = False
-    ENVIRONMENT: EnvironmentType = EnvironmentType.TEST
-
-    BACKEND_CORS_ORIGINS: list[AnyHttpUrl] = []
-    BACKEND_CORS_ALLOW_ALL: bool = False
-
-    LOGGING_CONF_FILE: str = "logging.conf"
-
 
     DUCKDB_FILENAME: str = "data/applehealth.duckdb"
     DUCKDB_QUERY_CACHE_ENABLED: bool = True
@@ -61,15 +48,6 @@ class Settings(BaseSettings):
         if not path.is_absolute():
             path = _PROJECT_ROOT / path
         return str(path)
-
-    @field_validator("BACKEND_CORS_ORIGINS", mode="after")
-    @classmethod
-    def assemble_cors_origins(cls, v: str | list[str]) -> list[str] | str:
-        if isinstance(v, str) and not v.startswith("["):
-            return [i.strip() for i in v.split(",")]
-        if isinstance(v, (list, str)):
-            return v
-        raise ValueError(v)
 
     model_config = SettingsConfigDict(
         case_sensitive=True,
