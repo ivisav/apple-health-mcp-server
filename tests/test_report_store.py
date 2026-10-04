@@ -388,3 +388,14 @@ def test_notes_filters_and_latest_per_subject() -> None:
 
     with pytest.raises(ValueError, match="kind"):
         get_report_notes(kinds=["gossip"])
+
+
+def test_notes_keep_write_order_not_alphabetical() -> None:
+    # Section 3 order matters (positives first, then concerns by severity);
+    # notes written in one call share created_at, so order must not fall back to text.
+    pid = _period("2026-03-09", "2026-03-15", "2026-03-15T10:00:00")
+    _metric(pid, "ctl", 40)
+    add_report_notes(pid, "finding", ["Zeta went well", "Alpha concern"], "weekly-health-report")
+
+    assert get_report_history(last_n=1)["notes"]["finding"] == ["Zeta went well", "Alpha concern"]
+    assert [n["text"] for n in get_report_notes(kinds=["finding"])] == ["Zeta went well", "Alpha concern"]

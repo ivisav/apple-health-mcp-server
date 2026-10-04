@@ -2,7 +2,6 @@ from collections.abc import Iterator
 from datetime import date, datetime
 from pathlib import Path
 
-import duckdb
 import pytest
 
 from app.services.health import report_store
@@ -158,33 +157,15 @@ def test_import_is_idempotent(tmp_path: Path) -> None:
     assert imp.main([str(src)]) == 0
     assert imp.main([str(src)]) == 0
 
-    # get_report_history / get_report_notes (Task 5) are not on this branch yet,
-    # so assert the same facts with direct read-only queries on the store file.
-    with duckdb.connect(str(report_store.store.path), read_only=True) as con:
-        periods = con.execute(
-            "SELECT id FROM report_periods ORDER BY report_generated DESC"
-        ).fetchall()
-        assert len(periods) == 2
-        newest = periods[0][0]
-        hrv = con.execute(
-            "SELECT m.value FROM report_metrics m JOIN report_periods p ON p.id = m.period_id "
-            "WHERE m.key = 'hrv_avg_ms' ORDER BY p.report_generated DESC"
-        ).fetchall()
-        assert [r[0] for r in hrv] == [50.0, 49.0]
-        notes: dict[str, list[str]] = {}
-        for kind, text in con.execute(
-            "SELECT kind, text FROM report_notes WHERE period_id = ? AND kind IN ('finding', 'flag')",
-            [newest],
-        ).fetchall():
-            notes.setdefault(kind, []).append(text)
-        assert {k: sorted(v) for k, v in notes.items()} == {
-            "finding": ["HRV up vs baseline", "Weight steady"],
-            "flag": ["low steps", "short sleep"],
-        }
-        cache = con.execute(
-            "SELECT DISTINCT subject FROM report_notes WHERE kind = 'validated_intervention'"
-        ).fetchall()
-        assert [r[0] for r in cache] == ["Example supplement timing"]
+    h = report_store.get_report_history(last_n=10)
+    assert len(h["periods"]) == 2
+    assert h["metrics"]["hrv_avg_ms"]["values"] == [50.0, 49.0]
+    assert h["notes"] == {
+        "finding": ["HRV up vs baseline", "Weight steady"],
+        "flag": ["low steps", "short sleep"],
+    }
+    cache = report_store.get_report_notes(kinds=["validated_intervention"], latest_per_subject=True)
+    assert [n["subject"] for n in cache] == ["Example supplement timing"]
 
 
 def test_no_blocks_returns_error_code(tmp_path: Path) -> None:

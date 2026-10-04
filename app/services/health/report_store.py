@@ -38,7 +38,8 @@ REPORT_STORE_SCHEMA = """
         subject VARCHAR,
         text VARCHAR NOT NULL,
         source_skill VARCHAR NOT NULL,
-        created_at TIMESTAMP DEFAULT now()
+        created_at TIMESTAMP DEFAULT now(),
+        position INTEGER NOT NULL DEFAULT 0  -- write order within one call
     );
 """
 
@@ -245,14 +246,14 @@ def add_report_notes(
                         [pid, kind, source],
                     ).fetchall()
                 )
-            for n, at in zip(notes, noted_at, strict=True):
+            for position, (n, at) in enumerate(zip(notes, noted_at, strict=True)):
                 con.execute(
                     """
                     INSERT INTO report_notes
-                        (period_id, kind, subject, text, source_skill, created_at)
-                    VALUES (?::UUID, ?, ?, ?, ?, COALESCE(?::TIMESTAMP, now()))
+                        (period_id, kind, subject, text, source_skill, created_at, position)
+                    VALUES (?::UUID, ?, ?, ?, ?, COALESCE(?::TIMESTAMP, now()), ?)
                     """,
-                    [pid, kind, n.subject, n.text, source, at],
+                    [pid, kind, n.subject, n.text, source, at, position],
                 )
             con.execute("COMMIT")
         except Exception:
@@ -323,7 +324,7 @@ def get_report_history(
                 """
                 SELECT kind, text FROM report_notes
                 WHERE period_id = ?::UUID AND kind IN ('finding', 'flag')
-                ORDER BY created_at, text
+                ORDER BY created_at, position
                 """,
                 [ids[0]],
             ).fetchall():
@@ -461,7 +462,7 @@ def get_report_notes(
             FROM report_notes n JOIN report_periods p ON p.id = n.period_id
             WHERE {" AND ".join(where)}
             {qualify}
-            ORDER BY n.created_at DESC
+            ORDER BY n.created_at DESC, n.position
             LIMIT ?
             """,
             [*params, limit],
