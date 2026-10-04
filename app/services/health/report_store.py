@@ -261,3 +261,221 @@ def add_report_notes(
         store.checkpoint(con)
 
     return {"period_id": pid, "kind": kind, "added": len(notes), "replaced": replaced}
+
+
+MAX_LAST_N = 52
+MAX_NOTES = 500
+
+
+def _num(v: Any) -> float | None:
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def get_report_history(
+    metrics: list[str] | None = None,
+    last_n: int = 4,
+    include_notes: bool = True,
+) -> dict[str, Any]:
+    if not 1 <= last_n <= MAX_LAST_N:
+        raise ValueError(f"last_n must be between 1 and {MAX_LAST_N}")
+    key_filter = " AND list_contains(?, m.key)" if metrics else ""
+    key_params: list[Any] = [metrics] if metrics else []
+
+    with store.lock, store.connect() as con:
+        periods = con.execute(
+            f"""
+            SELECT {_PERIOD_COLS} FROM report_periods
+            WHERE {_NON_EMPTY}
+            ORDER BY report_generated DESC LIMIT ?
+            """,
+            [last_n],
+        ).fetchall()
+        result: dict[str, Any] = {"periods": [_period_dict(p) for p in periods], "metrics": {}}
+        if include_notes:
+            result["notes"] = {}
+        if metrics is None:
+            result["keys_in_use"] = {}
+        if not periods:
+            return result
+
+        ids = [str(p[0]) for p in periods]
+        rows = con.execute(
+            f"""
+            SELECT CAST(m.period_id AS VARCHAR), m.key, m.value, m.value_text, m.unit
+            FROM report_metrics m
+            WHERE list_contains(?, CAST(m.period_id AS VARCHAR)){key_filter}
+            ORDER BY m.key
+            """,
+            [ids, *key_params],
+        ).fetchall()
+        extremes = con.execute(
+            f"""
+            SELECT m.key, max(m.value), arg_max(p.cp_end, m.value),
+                   min(m.value), arg_min(p.cp_end, m.value)
+            FROM report_metrics m JOIN report_periods p ON p.id = m.period_id
+            WHERE m.value IS NOT NULL{key_filter}
+            GROUP BY m.key
+            """,
+            key_params,
+        ).fetchall()
+        if include_notes:
+            for kind, text in con.execute(
+                """
+                SELECT kind, text FROM report_notes
+                WHERE period_id = ?::UUID AND kind IN ('finding', 'flag')
+                ORDER BY created_at, text
+                """,
+                [ids[0]],
+            ).fetchall():
+                result["notes"].setdefault(kind, []).append(text)
+        if metrics is None:
+            result["keys_in_use"] = {
+                k: n
+                for k, n in con.execute(
+                    "SELECT key, count(*) FROM report_metrics GROUP BY key ORDER BY key",
+                ).fetchall()
+            }
+
+    pos = {pid: i for i, pid in enumerate(ids)}
+    table: dict[str, dict[str, Any]] = {}
+    for pid, key, value, value_text, unit in rows:
+        entry = table.setdefault(key, {"unit": unit, "values": [None] * len(ids)})
+        entry["values"][pos[pid]] = value if value is not None else value_text
+        entry["unit"] = entry["unit"] or unit
+    ext = {k: (mx, mx_end, mn, mn_end) for k, mx, mx_end, mn, mn_end in extremes}
+    for key, entry in table.items():
+        nums = [n for n in (_num(v) for v in entry["values"]) if n is not None]
+        latest = _num(entry["values"][0])
+        prev = _num(entry["values"][1]) if len(ids) > 1 else None
+        core = CORE_METRICS.get(key)
+        entry["direction"] = core.direction if core else "unknown"
+        entry["avg_last_n"] = round(sum(nums) / len(nums), 3) if nums else None
+        entry["delta_vs_prev"] = (
+            round(latest - prev, 3) if latest is not None and prev is not None else None
+        )
+        if key in ext:
+            mx, mx_end, mn, mn_end = ext[key]
+            entry["all_time_max"] = {"value": mx, "cp_end": mx_end.isoformat()}
+            entry["all_time_min"] = {"value": mn, "cp_end": mn_end.isoformat()}
+        else:
+            entry["all_time_max"] = entry["all_time_min"] = None
+    result["metrics"] = table
+    return result
+
+
+def get_report_trend(
+    metrics: list[str],
+    granularity: str = "week",
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> dict[str, Any]:
+    if not metrics:
+        raise ValueError("metrics must list at least one key")
+    if granularity not in ("week", "month"):
+        raise ValueError(f"granularity must be 'week' or 'month', got {granularity!r}")
+    bucket = (
+        "printf('%d-W%02d', p.iso_year, p.iso_week)"
+        if granularity == "week"
+        else "strftime(p.cp_end, '%Y-%m')"
+    )
+    where = ["EXISTS (SELECT 1 FROM report_metrics m2 WHERE m2.period_id = p.id)"]
+    params: list[Any] = []
+    if date_from:
+        where.append("p.cp_end >= ?")
+        params.append(_parse_date(date_from, "date_from"))
+    if date_to:
+        where.append("p.cp_end <= ?")
+        params.append(_parse_date(date_to, "date_to"))
+    where_sql = " AND ".join(where)
+
+    with store.lock, store.connect() as con:
+        buckets = con.execute(
+            f"""
+            SELECT {bucket} AS bucket, count(*), sum(p.days)
+            FROM report_periods p WHERE {where_sql}
+            GROUP BY bucket ORDER BY bucket
+            """,
+            params,
+        ).fetchall()
+        values = con.execute(
+            f"""
+            SELECT {bucket} AS bucket, m.key, sum(m.value * p.days) / sum(p.days)
+            FROM report_metrics m JOIN report_periods p ON p.id = m.period_id
+            WHERE m.value IS NOT NULL AND list_contains(?, m.key) AND {where_sql}
+            GROUP BY bucket, m.key
+            """,
+            [metrics, *params],
+        ).fetchall()
+
+    labels = [b[0] for b in buckets]
+    pos = {b: i for i, b in enumerate(labels)}
+    series: dict[str, list[float | None]] = {k: [None] * len(labels) for k in metrics}
+    for b, key, v in values:
+        series[key][pos[b]] = round(float(v), 3)
+    return {
+        "granularity": granularity,
+        "buckets": labels,
+        "n_periods": [int(b[1]) for b in buckets],
+        "days": [float(b[2]) for b in buckets],
+        "series": series,
+    }
+
+
+def get_report_notes(
+    kinds: list[str] | None = None,
+    subject: str | None = None,
+    since: str | None = None,
+    latest_per_subject: bool = False,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    if kinds:
+        bad = [k for k in kinds if k not in NOTE_KINDS]
+        if bad:
+            raise ValueError(f"unknown note kind(s) {bad}; valid: {list(NOTE_KINDS)}")
+    if not 1 <= limit <= MAX_NOTES:
+        raise ValueError(f"limit must be between 1 and {MAX_NOTES}")
+    where = ["1=1"]
+    params: list[Any] = []
+    if kinds:
+        where.append("list_contains(?, n.kind)")
+        params.append(kinds)
+    if subject:
+        where.append("lower(n.subject) = lower(?)")
+        params.append(subject)
+    if since:
+        where.append("n.created_at >= ?")
+        params.append(_parse_timestamp(since, "since"))
+    qualify = ""
+    if latest_per_subject:
+        where.append("n.subject IS NOT NULL")
+        qualify = (
+            "QUALIFY row_number() OVER "
+            "(PARTITION BY n.kind, lower(n.subject) ORDER BY n.created_at DESC) = 1"
+        )
+
+    with store.lock, store.connect() as con:
+        rows = con.execute(
+            f"""
+            SELECT CAST(n.id AS VARCHAR), CAST(n.period_id AS VARCHAR), p.cp_end, n.kind,
+                   n.subject, n.text, n.source_skill, n.created_at
+            FROM report_notes n JOIN report_periods p ON p.id = n.period_id
+            WHERE {" AND ".join(where)}
+            {qualify}
+            ORDER BY n.created_at DESC
+            LIMIT ?
+            """,
+            [*params, limit],
+        ).fetchall()
+    return [
+        {
+            "id": r[0],
+            "period_id": r[1],
+            "cp_end": r[2].isoformat(),
+            "kind": r[3],
+            "subject": r[4],
+            "text": r[5],
+            "source_skill": r[6],
+            "created_at": r[7].isoformat(),
+        }
+        for r in rows
+    ]
