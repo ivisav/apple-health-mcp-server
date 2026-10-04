@@ -79,6 +79,7 @@ uv run scripts/import_baselines_note.py data/baselines.html             # safe t
 - **Faster, safer import**: runs across multiple processes, rebuilds atomically (safe to repeat), `IMPORT_LOOKBACK_MONTHS` limits how far back it imports, and `make duckdb-reset` deletes the imported database.
 - **Query cache**: an in-process TTL + LRU cache for DuckDB reads, configured with `DUCKDB_QUERY_CACHE_*` in `config/.env.example`.
 - **Better filtering**: stats and trend tools accept a list of types plus source and date filters. Source names match even with Apple's curly apostrophes and non-breaking spaces (e.g. `Apple Watch`).
+- **Security**: tool arguments never reach SQL unchecked (bound as parameters, or validated as type names, ISO dates and numbers), Elasticsearch is published on localhost only, and dependencies are kept free of applicable known vulnerabilities.
 - **Correctness fixes**: food records nested inside a Correlation are no longer counted twice. Relative DuckDB paths now resolve from the repo root instead of the working directory.
 
 ## 🧑‍💻 Development
@@ -87,6 +88,9 @@ uv run scripts/import_baselines_note.py data/baselines.html             # safe t
 make test     # pytest with coverage
 make check    # ruff lint + format check + ty (mirrors CI)
 make format   # auto-fix
+
+# dependency vulnerability audit
+uv export --frozen --no-hashes --all-groups --no-emit-project > /tmp/req.txt && uvx pip-audit -r /tmp/req.txt --disable-pip --no-deps
 ```
 
 After a re-import, restart the MCP server or wait out the cache TTL to see the new data.
