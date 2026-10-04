@@ -2,21 +2,18 @@
 
 [← Back to README](../README.md)
 
-## Environment Variables
+Settings come from `config/.env` (copy `config/.env.example`). All are optional; relative paths
+resolve from the repo root. Unknown keys in `config/.env` are ignored.
 
-> **Note:** All variables below are optional unless marked as required. If not set, the server will use the default values shown. Only `RAW_XML_PATH` is required and must point to your Apple Health XML file.
-
-| Variable           | Description                                | Example Value         | Required |
-|--------------------|--------------------------------------------|----------------------|----------|
-| RAW_XML_PATH       | Path to the Apple Health XML file           | `raw.xml`            | ✅       |
-| ES_HOST            | Elasticsearch host                          | `localhost`          | ❌       |
-| ES_PORT            | Elasticsearch port                          | `9200`               | ❌       |
-| ES_USER            | Elasticsearch username                      | `elastic`            | ❌       |
-| ES_PASSWORD        | Elasticsearch password                      | `elastic`            | ❌       |
-| ES_INDEX           | Elasticsearch index name                    | `apple_health_data`  | ❌       |
-| CH_DIRNAME         | ClickHouse directory name                   | `applehealth.chdb`   | ❌       |
-| CH_DB_NAME         | ClickHouse database name                    | `applehealth`        | ❌       |
-| CH_TABLE_NAME      | ClickHouse table name                       | `data`               | ❌       |
-| DUCKDB_FILENAME    | DuckDB parquet file name                    | `applehealth`        | ❌       |
-| CHUNK_SIZE         | Records indexed into CH/DuckDB at once      | `50000`              | ❌       |
-| XML_SAMPLE_SIZE    | Number of XML records to sample             | `1000`               | ❌       |
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `RAW_XML_PATH` | Apple Health `export.xml` read by `make duckdb` | `raw.xml` |
+| `DUCKDB_FILENAME` | Imported health database (local path or `http(s)://` URL) | `data/applehealth.duckdb` |
+| `LOGS_DUCKDB_FILENAME` | Writable fueling-log database | `data/manual_logs.duckdb` |
+| `REPORTS_DUCKDB_FILENAME` | Writable report-history database | `data/health_reports.duckdb` |
+| `IMPORT_LOOKBACK_MONTHS` | Only import records from the last N months | unset (everything) |
+| `IMPORT_WORKERS` | Parallel import processes | CPU count |
+| `CHUNK_SIZE` | Records written per batch during import | `50000` |
+| `DUCKDB_QUERY_CACHE_ENABLED` | In-process cache for DuckDB reads | `true` |
+| `DUCKDB_QUERY_CACHE_TTL_SECONDS` | Cache entry lifetime | `1800` |
+| `DUCKDB_QUERY_CACHE_MAXSIZE` | Max cached entries per query type | `256` |
