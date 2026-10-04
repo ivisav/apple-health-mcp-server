@@ -110,9 +110,6 @@ def search_fueling_events(
     Notes for LLMs:
     - Use this to pull fueling history for a ride, a day, or a reporting
       period (e.g. for a weekly report's nutrition/fueling section).
-    - If there are multiple databases available (DuckDB, Elasticsearch), this
-      tool only ever reads from the manual logs database — it is independent
-      of which health-data backend the user picked.
     """
     try:
         return _search_fueling_events(

@@ -2,134 +2,74 @@
 
 [← Back to README](../README.md)
 
-Follow these steps to set up Apple Health MCP Server in your environment.
-
 ## Prerequisites
 
-- **Docker (recommended) or uv + docker**: For dependency management
-
-   👉 [uv Installation Guide](https://docs.astral.sh/uv/getting-started/installation/)
-- **Clone the repository**:
-   ```sh
-   git clone https://github.com/the-momentum/apple-health-mcp-server
-   cd apple-health-mcp-server
-   ```
-
-- **Set up environment variables**:
-   ```sh
-   cp config/.env.example config/.env
-   ```
-   Edit the `config/.env` file with your credentials and configuration. See [Environment Variables](../README.md#-Environment-Variables)
+- [uv](https://docs.astral.sh/uv/getting-started/installation/); Docker is optional.
+- Clone and configure:
+  ```sh
+  git clone https://github.com/ivisav/apple-health-mcp-server
+  cd apple-health-mcp-server
+  uv sync
+  cp config/.env.example config/.env
+  ```
+  See [Configuration](configuration.md) for the available settings.
 
 ## Prepare Your Data
 
-1. Export your Apple Health data as an XML file from your iPhone and place it somewhere in your filesystem. By default, the server expects the file in the project root directory.
-  - if you need working example, we suggest this dataset: https://drive.google.com/file/d/1msBrYuW5e4xHql4KNvUVIJJwA7lg4j1m/view?usp=drive_link
-    - Rob Mulla. Predict My Sleep Patterns. https://kaggle.com/competitions/kaggle-pog-series-s01e04, 2023. Kaggle.
-2. Prepare an Elasticsearch instance and populate it from the XML file:
-   - Run `make es` to start Elasticsearch and import your XML data.
-   - (Optional) To clear all data from the Elasticsearch index, run:
-     ```sh
-     uv run python scripts/xml2es.py --delete-all
-     ```
-3. If you choose to use ClickHouse instead of Elasticsearch:
-   - Run `make ch` to create a database with your exported XML data
-   - **Note: If you are using Windows, Docker is the only way to integrate ClickHouse into this MCP Server.**
-   - On Windows: Run `mingw32-make chwin` (or any other version of `make` available on Windows)
-
-4. Lastly, if you're going to be using DuckDB:
-   - Run `make duckdb` to create a parquet file with your exported XML data
-   - If you want to connect to the file through http(s):
-     - The only thing you need to do is change the .env path, e.g. `localhost:8080/applehealth.parquet`
-     - If you want an example on how to host the files locally, run `uv run tests/fileserver.py`
-   - **Re-importing / updating:** Apple Health exports contain your full history every
-     time. `make duckdb` rebuilds the database atomically (into a temp file, swapped in
-     on success), so it is always safe to re-run — it never creates duplicates, and a
-     failed or interrupted run leaves the existing database untouched. Restart the MCP
-     server afterwards (or wait out the query-cache TTL) to pick up the new data.
-     - `make duckdb` — rebuild from the current export.
-     - `make duckdb-reset` — delete `data/applehealth.duckdb` and its `-wal`/temp files.
-       `data/manual_logs.duckdb` (fueling log) and `data/health_reports.duckdb` (report history) are never touched.
-   
-
-## Configuration Files
-
-You can run the MCP Server in your LLM Client in two ways:
-- **Docker** (recommended)
-- **Local (uv run)**
-
-### Docker MCP Server
-
-1. Build the Docker image:
+1. Export your Apple Health data on your iPhone and unzip it into the repo
+   (`unzip ~/Downloads/export.zip -d .` creates `apple_health_export/export.xml`; git ignores it).
+   Set `RAW_XML_PATH="apple_health_export/export.xml"` in `config/.env`.
+   - Need sample data? Rob Mulla, *Predict My Sleep Patterns*,
+     https://kaggle.com/competitions/kaggle-pog-series-s01e04, 2023 (Kaggle).
+2. Import into DuckDB:
    ```sh
-   make build
+   make duckdb
    ```
-2. Add the following config to your LLM Client settings (replace `<project-path>` with your local repository path and `<xml-file-name>` with name of your raw data from apple health file (without `.xml` extension)):
-   ```json
-   {
-     "mcpServers": {
-       "docker-mcp-server": {
-         "command": "docker",
-         "args": [
-            "run",
-            "-i",
-            "--rm",
-            "--init",
-            "--mount",
-            "type=bind,source=<project-path>/{xml-file-name}.xml,target=/root_project/raw.xml",
-            "--mount", // optional - volume for reload
-            "type=bind,source=<project-path>/app,target=/root_project/app", // optional
-            "--mount",
-            "type=bind,source=<project-path>/config/.env,target=/root_project/config/.env",
-            "--mount", // optional - only include this if you use clickhouse
-            "type=bind,source=<project-path>/applehealth.chdb,target=/root_project/applehealth.chdb", // optional
-            "--mount", // optional - only include this if you use duckdb
-            "type=bind,source=<project-path>/<parquet-file-name>,target=/root_project/applehealth.parquet", // optional
-            "-e",
-            "ES_HOST=host.docker.internal",
-            "apple-health-mcp:latest"
-         ]
-       }
-     }
-   }
-   ```
+   Apple Health exports contain your full history every time. The import rebuilds
+   `data/applehealth.duckdb` atomically (temp file swapped in on success), so it's always safe to
+   re-run: no duplicates, and a failed run leaves the existing database untouched. Restart the MCP
+   server afterwards (or wait out the query-cache TTL) to see new data.
+   - `make duckdb-reset` deletes `data/applehealth.duckdb` and its `-wal`/temp files.
+     `data/manual_logs.duckdb` (fueling log) and `data/health_reports.duckdb` (report history)
+     are never touched.
 
-### Local uv MCP Server
+## Connect Your MCP Client
 
-1. Get the path to your `uv` binary:
-   - On Windows:
-     ```powershell
-     (Get-Command uv).Path
-     ```
-   - On MacOS/Linux:
-     ```sh
-     which uv
-     ```
-2. Add the following config to your LLM Client settings (replace `<project-path>` and `<path-to-bin-folder>` as appropriate):
-   ```json
-   {
-     "mcpServers": {
-       "uv-mcp-server": {
-         "command": "uv",
-         "args": [
-           "run",
-           "--frozen",
-           "--directory",
-           "<project-path>",
-           "start"
-         ],
-         "env": {
-           "PATH": "<path-to-uv-bin-folder>"
-         }
-       }
-     }
-   }
-   ```
-   - `<path-to-uv-bin-folder>` should be the folder containing the `uv` binary (do not include `uv` itself at the end).
+### Local (uv)
 
-## 3. Restart Your MCP Client
+Find your uv binary (`which uv` on macOS/Linux, `(Get-Command uv).Path` on Windows), then add:
+```json
+{
+  "mcpServers": {
+    "apple-health": {
+      "command": "uv",
+      "args": ["run", "--frozen", "--directory", "<project-path>", "start"],
+      "env": { "PATH": "<folder-containing-uv>" }
+    }
+  }
+}
+```
 
-After completing the above steps, restart your MCP Client to apply the changes. In some cases, you may need to terminate all related processes using Task Manager or your system's process manager to ensure:
-- The updated configuration is properly loaded
-- Environment variables are correctly applied
-- The Apple Health MCP client initializes with the correct settings
+### Docker
+
+Build the image with `make build`, then add (the import still runs on the host with `make duckdb`;
+the container only reads `data/`):
+```json
+{
+  "mcpServers": {
+    "apple-health": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm", "--init",
+        "--mount", "type=bind,source=<project-path>/app,target=/root_project/app",
+        "--mount", "type=bind,source=<project-path>/config/.env,target=/root_project/config/.env",
+        "--mount", "type=bind,source=<project-path>/data,target=/root_project/data",
+        "apple-health-mcp:latest"
+      ]
+    }
+  }
+}
+```
+The `app` mount is optional; it lets code changes apply without rebuilding the image.
+
+Restart your MCP client after changing its config.

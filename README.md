@@ -43,7 +43,7 @@ Connect your Apple Health export to any LLM client that supports MCP. You can as
    ```
 7. **Updating later**: download a new export and repeat steps 3 and 5, then restart the MCP server. Each import rebuilds the database from scratch, so it never creates duplicates, and a failed run leaves the existing database untouched.
 
-For Docker or Elasticsearch setups, see **[Getting Started](docs/getting-started.md)**.
+For a Docker setup, see **[Getting Started](docs/getting-started.md)**.
 
 ## 🛠️ Tools
 
@@ -59,7 +59,7 @@ For Docker or Elasticsearch setups, see **[Getting Started](docs/getting-started
 | `log_fueling_event` / `search_fueling_events` / `delete_fueling_event` | Manual log of drinks, gels, bars, etc. |
 | `start_report_period` / `upsert_report_metrics` / `add_report_notes` / `get_report_history` / `get_report_trend` / `get_report_notes` | Weekly report history: per-period metrics and notes, week/month trends |
 
-XML (`*_xml_*`) and Elasticsearch (`*_es`) variants are also available. Full list: [MCP Tools](docs/mcp-tools.md).
+Full list: [MCP Tools](docs/mcp-tools.md).
 
 ## 📈 Report history
 
@@ -79,14 +79,15 @@ uv run scripts/import_baselines_note.py data/baselines.html             # safe t
 - **Faster, safer import**: runs across multiple processes, rebuilds atomically (safe to repeat), `IMPORT_LOOKBACK_MONTHS` limits how far back it imports, and `make duckdb-reset` deletes the imported database.
 - **Query cache**: an in-process TTL + LRU cache for DuckDB reads, configured with `DUCKDB_QUERY_CACHE_*` in `config/.env.example`.
 - **Better filtering**: stats and trend tools accept a list of types plus source and date filters. Source names match even with Apple's curly apostrophes and non-breaking spaces (e.g. `Apple Watch`).
-- **Security**: tool arguments never reach SQL unchecked (bound as parameters, or validated as type names, ISO dates and numbers), Elasticsearch is published on localhost only, and dependencies are kept free of applicable known vulnerabilities.
+- **DuckDB only**: the upstream Elasticsearch, ClickHouse and XML direct-read backends are removed — one import pipeline, 16 tools, fewer dependencies.
+- **Security**: tool arguments never reach SQL unchecked (bound as parameters, or validated as type names, ISO dates and numbers), and dependencies are kept free of applicable known vulnerabilities.
 - **Correctness fixes**: food records nested inside a Correlation are no longer counted twice. Relative DuckDB paths now resolve from the repo root instead of the working directory.
 
 ## 🧑‍💻 Development
 
 ```sh
 make test     # pytest with coverage
-make check    # ruff lint + format check + ty (mirrors CI)
+make check    # ruff lint + format check + ty
 make format   # auto-fix
 
 # dependency vulnerability audit
@@ -97,7 +98,7 @@ After a re-import, restart the MCP server or wait out the cache TTL to see the n
 
 ## 📚 Docs
 
-[Getting Started](docs/getting-started.md) · [Configuration](docs/configuration.md) · [MCP Tools](docs/mcp-tools.md) · [About & Architecture](docs/about.md) · [Roadmap](docs/roadmap.md)
+[Getting Started](docs/getting-started.md) · [Configuration](docs/configuration.md) · [MCP Tools](docs/mcp-tools.md) · [About & Architecture](docs/about.md)
 
 ## 🌱 Origins
 

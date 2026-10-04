@@ -9,8 +9,7 @@ join_query: str = "INNER JOIN stats ON workouts.startDate = stats.startDate"
 
 # Tool arguments come from an LLM and may carry injected text. Every value that is
 # spliced into SQL below goes through one of these validators first, so it can never
-# change the query's shape (these helpers are shared by DuckDB, Parquet and ClickHouse,
-# which bind parameters differently).
+# change the query's shape (fill_query builds SQL text rather than binding parameters).
 _IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 

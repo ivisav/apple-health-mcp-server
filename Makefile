@@ -1,6 +1,5 @@
 DOCKER_COMMAND = docker compose -f docker-compose.yml
 UV = uv run
-ALEMBIC_CMD = $(UV) alembic
 
 help:	## Show this help.
 	@echo "============================================================"
@@ -24,10 +23,9 @@ down:	## Kills running instance
 	$(DOCKER_COMMAND) down
 
 test:	## Run the tests.
-	export ENV=config/.env.test
 	$(UV) pytest -v --cov=app
 
-lint:  ## Check lint + format + types (run before pushing; mirrors CI)
+lint:  ## Check lint + format + types (run before pushing)
 	$(UV) ruff check
 	$(UV) ruff format --check
 	$(UV) ty check
@@ -38,37 +36,8 @@ format:  ## Auto-fix lint issues and reformat
 
 check: lint  ## Alias for `make lint` (the full pre-push gate)
 
-migrate:  ## Apply all migrations
-	$(ALEMBIC_CMD) upgrade head
-
-create_migration:  ## Create a new migration. Use 'make create_migration m="Description of the change"'
-	@if [ -z "$(m)" ]; then \
-		echo "Error: You must provide a migration description using 'm=\"Description\"'"; \
-		exit 1; \
-	fi
-	$(ALEMBIC_CMD) revision --autogenerate -m "$(m)"
-
-es:  ## Run Elasticsearch and import Apple Health XML data into ES for Apple Health MCP Server
-	./scripts/run_elasticsearch.sh
-	$(UV) python scripts/xml2es.py
-
-ch: ## Import Apple Health XML data into a docker volume for ClickHouse
-	$(UV) scripts/clickhouse_importer.py
-
-chwin: ## Import Apple Health XML data into a docker volume for ClickHouse (for Windows users)
-	move *.xml xmltemp123
-	docker volume create applehealth-data
-	docker build . --file Dockerfile.ch -t uvcopier
-	docker run --rm -v applehealth-data:/volume uvcopier
-	docker run --rm -v applehealth-data:/source -v $pwd/:/dest alpine cp -r /source/applehealth.chdb /dest/
-	move xmltemp123 raw.xml
-	docker volume rm applehealth-data
-
 duckdb: ## Import Apple Health XML data to a Parquet file for DuckDB
 	$(UV) scripts/duckdb_importer.py
 
 duckdb-reset: ## Delete the imported Apple Health DuckDB file (keeps manual_logs.duckdb)
 	$(UV) scripts/duckdb_importer.py --reset
-
-downgrade:  ## Revert the last migration
-	$(ALEMBIC_CMD) downgrade -1
