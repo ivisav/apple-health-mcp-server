@@ -38,7 +38,6 @@ class Settings(BaseSettings):
     CHUNK_SIZE: int = 50_000
 
     RAW_XML_PATH: str = "raw.xml"
-    XML_SAMPLE_SIZE: int = 1000
 
     IMPORT_LOOKBACK_MONTHS: int | None = None
     IMPORT_WORKERS: int | None = None
