@@ -51,8 +51,8 @@ def _source_name_filter(source_name: str | None) -> str:
     """
     ``AND <norm(sourceName)> = <norm($source_name)>`` (bound param), or ``""``.
 
-    Both sides go through ``normalized_source`` so a plain ``Igor's Apple Watch``
-    matches the ``Igor’s Apple\xa0Watch`` (curly apostrophe + NBSP) Apple stores.
+    Both sides go through ``normalized_source`` so a plain ``Alex's Apple Watch``
+    matches the ``Alex’s Apple\xa0Watch`` (curly apostrophe + NBSP) Apple stores.
     """
     if not source_name:
         return ""

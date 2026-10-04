@@ -1,7 +1,7 @@
 """
 End-to-end check that source_name filtering tolerates the Unicode punctuation Apple
 actually stores in device names: a curly apostrophe (U+2019) and a no-break space
-(U+00A0), e.g. ``Igor’s Apple\xa0Watch``. Callers pass a plain ``Igor's Apple Watch``.
+(U+00A0), e.g. ``Alex’s Apple\xa0Watch``. Callers pass a plain ``Alex's Apple Watch``.
 """
 
 from collections.abc import Iterator
@@ -13,8 +13,8 @@ from app.config import settings
 from app.schemas.record import HealthRecordSearchParams
 from app.services.health import duckdb_queries
 
-STORED_SOURCE = "Igor’s Apple Watch"  # curly apostrophe + NBSP
-QUERIED_SOURCE = "Igor's Apple Watch"  # straight apostrophe + normal space
+STORED_SOURCE = "Alex’s Apple Watch"  # curly apostrophe + NBSP
+QUERIED_SOURCE = "Alex's Apple Watch"  # straight apostrophe + normal space
 RECORD_TYPE = "HKQuantityTypeIdentifierActiveEnergyBurned"
 
 _FUNCS = [

@@ -70,8 +70,8 @@ def normalized_source(expr: str) -> str:
     apostrophes (U+2018/U+2019) to ``'``, no-break / narrow-no-break spaces
     (U+00A0/U+202F) to a normal space, then trim and lowercase.
 
-    Apple stores e.g. ``Igor’s Apple Watch`` (curly apostrophe + NBSP), so a
-    plain ``sourceName = 'Igor''s Apple Watch'`` never matches. Applied to BOTH
+    Apple stores e.g. ``Alex’s Apple Watch`` (curly apostrophe + NBSP), so a
+    plain ``sourceName = 'Alex''s Apple Watch'`` never matches. Applied to BOTH
     sides of the comparison.
     """
     return (
