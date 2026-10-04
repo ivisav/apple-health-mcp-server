@@ -27,10 +27,6 @@ class Settings(BaseSettings):
     LOGGING_CONF_FILE: str = "logging.conf"
 
 
-    CH_DIRNAME: str = "applehealth.chdb"
-    CH_DB_NAME: str = "applehealth"
-    CH_TABLE_NAME: str = "data"
-
     DUCKDB_FILENAME: str = "data/applehealth.duckdb"
     DUCKDB_QUERY_CACHE_ENABLED: bool = True
     DUCKDB_QUERY_CACHE_TTL_SECONDS: int = 1800

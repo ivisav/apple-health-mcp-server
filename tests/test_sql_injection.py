@@ -50,7 +50,7 @@ def synthetic_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Pa
     monkeypatch.setattr(q, "_con", None)
 
 
-# --- shared helpers (used by DuckDB, Parquet and ClickHouse paths) ---------------
+# --- shared helpers (SQL text built for DuckDB) ---------------
 
 
 @pytest.mark.parametrize("bad", INJECTIONS)

@@ -82,7 +82,7 @@ def search_health_records_duckdb(
       different tables and can't be queried together in one call.
     - This function should return a list of health record documents (dicts)
       matching the search criteria ordered by date from most to least recent.
-    - Each document in the list should represent a single health record as stored in ClickHouse.
+    - Each document in the list should represent a single health record as stored in DuckDB.
     - If an error occurs, the function should return a list with a single dict
       containing an ‘error’ key and the error message.
     - Use this to retrieve structured health data for further analysis, filtering, or display.

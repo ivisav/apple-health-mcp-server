@@ -48,18 +48,6 @@ create_migration:  ## Create a new migration. Use 'make create_migration m="Desc
 	fi
 	$(ALEMBIC_CMD) revision --autogenerate -m "$(m)"
 
-ch: ## Import Apple Health XML data into a docker volume for ClickHouse
-	$(UV) scripts/clickhouse_importer.py
-
-chwin: ## Import Apple Health XML data into a docker volume for ClickHouse (for Windows users)
-	move *.xml xmltemp123
-	docker volume create applehealth-data
-	docker build . --file Dockerfile.ch -t uvcopier
-	docker run --rm -v applehealth-data:/volume uvcopier
-	docker run --rm -v applehealth-data:/source -v $pwd/:/dest alpine cp -r /source/applehealth.chdb /dest/
-	move xmltemp123 raw.xml
-	docker volume rm applehealth-data
-
 duckdb: ## Import Apple Health XML data to a Parquet file for DuckDB
 	$(UV) scripts/duckdb_importer.py
 
