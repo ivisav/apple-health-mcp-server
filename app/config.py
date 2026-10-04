@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     DUCKDB_QUERY_CACHE_MAXSIZE: int = 256
 
     LOGS_DUCKDB_FILENAME: str = "data/manual_logs.duckdb"
+    REPORTS_DUCKDB_FILENAME: str = "data/health_reports.duckdb"
 
     CHUNK_SIZE: int = 50_000
 
@@ -51,7 +52,9 @@ class Settings(BaseSettings):
     IMPORT_LOOKBACK_MONTHS: int | None = None
     IMPORT_WORKERS: int | None = None
 
-    @field_validator("DUCKDB_FILENAME", "LOGS_DUCKDB_FILENAME", mode="after")
+    @field_validator(
+        "DUCKDB_FILENAME", "LOGS_DUCKDB_FILENAME", "REPORTS_DUCKDB_FILENAME", mode="after"
+    )
     @classmethod
     def anchor_duckdb_path(cls, v: str) -> str:
         """

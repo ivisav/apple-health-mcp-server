@@ -168,6 +168,23 @@ def test_refuses_to_target_logs_db(
         assert logs_db.stat().st_mtime_ns == mtime_before
 
 
+def test_refuses_to_target_reports_db(
+    make_importer: Callable[..., ParquetImporter],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reports_db = Path(settings.REPORTS_DUCKDB_FILENAME)
+    assert reports_db.is_absolute()
+    assert reports_db.name == "health_reports.duckdb"
+    mtime_before = reports_db.stat().st_mtime_ns if reports_db.exists() else None
+
+    imp = make_importer(_xml(_record()))
+    monkeypatch.setattr(imp, "path", reports_db)
+    with pytest.raises(RuntimeError, match="report-store"):
+        imp.export_xml()
+
+    if mtime_before is not None:
+        assert reports_db.stat().st_mtime_ns == mtime_before
+
 def test_reset_removes_import_db_only(make_importer: Callable[..., ParquetImporter], tmp_path: Path) -> None:
     imp = make_importer(_xml(_record()))
     imp.export_xml()

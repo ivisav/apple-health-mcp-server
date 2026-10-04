@@ -80,11 +80,17 @@ def _sweep_orphans(live: Path) -> None:
 
 
 def _assert_not_logs_db(target: Path) -> None:
-    """Guard: the importer must never write the separate, authoritative manual-logs DB."""
+    """Guard: the importer must never write the separate, authoritative runtime DBs."""
     logs = Path(settings.LOGS_DUCKDB_FILENAME)
     if target.resolve() == logs.resolve():
         raise RuntimeError(
             f"Refusing to import into the manual-logs DB ({logs}); "
+            f"the importer only writes {settings.DUCKDB_FILENAME}",
+        )
+    reports = Path(settings.REPORTS_DUCKDB_FILENAME)
+    if target.resolve() == reports.resolve():
+        raise RuntimeError(
+            f"Refusing to import into the report-store DB ({reports}); "
             f"the importer only writes {settings.DUCKDB_FILENAME}",
         )
 
