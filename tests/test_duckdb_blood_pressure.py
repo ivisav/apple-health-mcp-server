@@ -13,8 +13,8 @@ import pytest
 from app.config import settings
 from app.services.health import duckdb_queries
 
-STORED_SOURCE = "Igor’s Apple\xa0Watch"  # curly apostrophe + NBSP
-QUERIED_SOURCE = "Igor's Apple Watch"  # straight apostrophe + normal space
+STORED_SOURCE = "Alex’s Apple\xa0Watch"  # curly apostrophe + NBSP
+QUERIED_SOURCE = "Alex's Apple Watch"  # straight apostrophe + normal space
 
 SYSTOLIC = "HKQuantityTypeIdentifierBloodPressureSystolic"
 DIASTOLIC = "HKQuantityTypeIdentifierBloodPressureDiastolic"

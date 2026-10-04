@@ -18,6 +18,8 @@ from app.services.health.sql_helpers import (
     join_query,
     join_string,
     normalized_source,
+    sql_timestamp,
+    sql_type,
     type_filter,
     value_aggregates,
 )
@@ -49,8 +51,8 @@ def _source_name_filter(source_name: str | None) -> str:
     """
     ``AND <norm(sourceName)> = <norm($source_name)>`` (bound param), or ``""``.
 
-    Both sides go through ``normalized_source`` so a plain ``Igor's Apple Watch``
-    matches the ``Igor’s Apple\xa0Watch`` (curly apostrophe + NBSP) Apple stores.
+    Both sides go through ``normalized_source`` so a plain ``Alex's Apple Watch``
+    matches the ``Alex’s Apple\xa0Watch`` (curly apostrophe + NBSP) Apple stores.
     """
     if not source_name:
         return ""
@@ -174,15 +176,23 @@ def get_sleep_summary_from_duckdb(
     date_from: str | None = None,
     date_to: str | None = None,
 ) -> list[dict[str, Any]]:
-    result = _get_con().sql(f"""
+    params: dict[str, Any] = {}
+    if date_from:
+        params["date_from"] = sql_timestamp(date_from, "date_from")
+    if date_to:
+        params["date_to"] = sql_timestamp(date_to, "date_to")
+    result = _get_con().sql(
+        f"""
         SELECT DATE_TRUNC('day', startDate) AS night, textValue AS stage,
         COUNT(*) AS segment_count,
         SUM(date_diff('minute', startDate, endDate)) AS total_minutes
         FROM records WHERE type = 'HKCategoryTypeIdentifierSleepAnalysis'
-        {f"AND startDate >= '{date_from}'" if date_from else ""}
-        {f"AND startDate <= '{date_to}'" if date_to else ""}
+        {"AND startDate >= $date_from" if date_from else ""}
+        {"AND startDate <= $date_to" if date_to else ""}
         GROUP BY night, stage ORDER BY night DESC, stage
-    """)
+        """,
+        params=params,
+    )
     return client.format_response(result)
 
 
@@ -246,13 +256,23 @@ def search_values_from_duckdb(
     table = get_table(record_type)
     join_clause = join_string(table)
 
-    result = _get_con().sql(f"""
-        SELECT * FROM {table} {join_clause} WHERE textValue = '{value}'
-        {f"AND {table}.type = '{record_type}'" if record_type else ""}
-        {f"AND startDate >= '{date_from}'" if date_from else ""}
-        {f"AND startDate <= '{date_to}'" if date_to else ""}
+    params: dict[str, Any] = {"value": value}
+    if record_type:
+        params["record_type"] = sql_type(record_type)
+    if date_from:
+        params["date_from"] = sql_timestamp(date_from, "date_from")
+    if date_to:
+        params["date_to"] = sql_timestamp(date_to, "date_to")
+    result = _get_con().sql(
+        f"""
+        SELECT * FROM {table} {join_clause} WHERE textValue = $value
+        {f"AND {table}.type = $record_type" if record_type else ""}
+        {"AND startDate >= $date_from" if date_from else ""}
+        {"AND startDate <= $date_to" if date_to else ""}
         ORDER BY startDate DESC
-    """)
+        """,
+        params=params,
+    )
     return client.format_response(result)
 
 

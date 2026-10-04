@@ -16,5 +16,5 @@ docker run -d \
   -e xpack.security.http.ssl.enabled=false \
   -e bootstrap.memory_lock=true \
   -e TZ=UTC \
-  -p 9200:9200 \
+  -p 127.0.0.1:9200:9200 \
   docker.elastic.co/elasticsearch/elasticsearch:9.0.3

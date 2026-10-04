@@ -54,7 +54,7 @@ def test_fill_query_source_name_uses_camel_case_column() -> None:
     query = fill_query(
         HealthRecordSearchParams(
             record_type="HKQuantityTypeIdentifierStepCount",
-            source_name="Igor's Apple Watch",
+            source_name="Alex's Apple Watch",
             limit=5,
         ),
     )

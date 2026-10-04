@@ -61,6 +61,17 @@ For Docker or Elasticsearch setups, see **[Getting Started](docs/getting-started
 
 XML (`*_xml_*`) and Elasticsearch (`*_es`) variants are also available. Full list: [MCP Tools](docs/mcp-tools.md).
 
+## 📈 Report history
+
+Weekly-report skills save each period's metrics, findings and flags with the `*_report_*` tools, and read back history or week/month trends in one small call instead of re-reading old reports or notes. The data lives in `data/health_reports.duckdb` (`REPORTS_DUCKDB_FILENAME`), which is created empty on first use, never touched by the importer, and kept out of git and the Docker image.
+
+One-time import of an existing "Weekly Health Baselines" Apple Note (Markdown text or the Notes HTML body):
+```sh
+osascript -e 'tell application "Notes" to get body of (first note whose name starts with "Weekly Health Baselines")' > data/baselines.html
+uv run scripts/import_baselines_note.py data/baselines.html --dry-run   # check periods + warnings
+uv run scripts/import_baselines_note.py data/baselines.html             # safe to re-run
+```
+
 ## ✨ What's new in this fork
 
 - **Fueling log**: manual fueling events are stored in a separate writable DuckDB file (`LOGS_DUCKDB_FILENAME`). The importer never touches it, and every write is flushed to disk immediately.
@@ -68,6 +79,7 @@ XML (`*_xml_*`) and Elasticsearch (`*_es`) variants are also available. Full lis
 - **Faster, safer import**: runs across multiple processes, rebuilds atomically (safe to repeat), `IMPORT_LOOKBACK_MONTHS` limits how far back it imports, and `make duckdb-reset` deletes the imported database.
 - **Query cache**: an in-process TTL + LRU cache for DuckDB reads, configured with `DUCKDB_QUERY_CACHE_*` in `config/.env.example`.
 - **Better filtering**: stats and trend tools accept a list of types plus source and date filters. Source names match even with Apple's curly apostrophes and non-breaking spaces (e.g. `Apple Watch`).
+- **Security**: tool arguments never reach SQL unchecked (bound as parameters, or validated as type names, ISO dates and numbers), Elasticsearch is published on localhost only, and dependencies are kept free of applicable known vulnerabilities.
 - **Correctness fixes**: food records nested inside a Correlation are no longer counted twice. Relative DuckDB paths now resolve from the repo root instead of the working directory.
 
 ## 🧑‍💻 Development
@@ -76,6 +88,9 @@ XML (`*_xml_*`) and Elasticsearch (`*_es`) variants are also available. Full lis
 make test     # pytest with coverage
 make check    # ruff lint + format check + ty (mirrors CI)
 make format   # auto-fix
+
+# dependency vulnerability audit
+uv export --frozen --no-hashes --all-groups --no-emit-project > /tmp/req.txt && uvx pip-audit -r /tmp/req.txt --disable-pip --no-deps
 ```
 
 After a re-import, restart the MCP server or wait out the cache TTL to see the new data.

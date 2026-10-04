@@ -17,8 +17,7 @@ services:
       - type: bind
         source: ./data
         target: /root_project/data
-    ports:
-      - 8000:8000
+    # MCP runs over stdio (no listening port), so nothing is published.
     stdin_open: true
     restart: on-failure
 
@@ -35,7 +34,7 @@ services:
       - bootstrap.memory_lock=true
       - TZ=UTC
     ports:
-      - 9200:9200
+      - 127.0.0.1:9200:9200  # localhost only: the default password must never be reachable from the LAN
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health"]
       interval: 10s
