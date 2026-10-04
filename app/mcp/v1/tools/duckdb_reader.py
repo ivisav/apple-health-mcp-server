@@ -27,15 +27,6 @@ def get_health_summary_duckdb() -> list[dict[str, Any]]:
     - IMPORTANT - Do not guess, autofill, or assume any missing data.
     - Use this tool if you're not certain of the record type that
       should be called
-    - If there are multiple databases available (DuckDB, Elasticsearch):
-      first, ask the user which one he wants to use. DO NOT call any tools before
-      the user specifies his intent.
-    - If the user decides on an option, only use tools from this database,
-      do not switch over to another until the user specifies that he wants
-      to use a different one. You do not have to keep asking whether
-      the user wants to use the same database that he used before.
-    - If there is only one database available (DuckDB, Elasticsearch):
-      you can use the tools from this database without the user specifying it.
     """
     try:
         return get_health_summary_from_duckdb()
@@ -101,15 +92,6 @@ def search_health_records_duckdb(
     - IMPORTANT - Do not guess, autofill, or assume any missing data.
     - This tool can be used to search for most recent records of a given type,
       in which case you should use this tool with a limit of 1.
-    - If there are multiple databases available (DuckDB, Elasticsearch):
-      first, ask the user which one he wants to use. DO NOT call any tools before
-      the user specifies his intent.
-    - If the user decides on an option, only use tools from this database,
-      do not switch over to another until the user specifies that he wants
-      to use a different one. You do not have to keep asking whether
-      the user wants to use the same database that he used before.
-    - If there is only one database available (DuckDB, Elasticsearch):
-      you can use the tools from this database without the user specifying it.
     """
     try:
         params = HealthRecordSearchParams(
@@ -182,15 +164,6 @@ def get_statistics_by_type_duckdb(
     - This tool can also be used to figure out the value of the record with
       the shortest/longest duration or highest/lowest value
     - IMPORTANT - Do not guess, autofill, or assume any missing data.
-    - If there are multiple databases available (DuckDB, Elasticsearch):
-      first, ask the user which one he wants to use. DO NOT call any tools before
-      the user specifies his intent.
-    - If the user decides on an option, only use tools from this database,
-      do not switch over to another until the user specifies that he wants
-      to use a different one. You do not have to keep asking whether
-      the user wants to use the same database that he used before.
-    - If there is only one database available (DuckDB, Elasticsearch):
-      you can use the tools from this database without the user specifying it.
     """
     try:
         return get_statistics_by_type_from_duckdb(record_type, source_name, date_from, date_to)
@@ -253,15 +226,6 @@ def get_trend_data_duckdb(
     - IMPORTANT - interval must be one of: "day", "week", "month", or "year".
       Do not use other values.
     - Do not guess, autofill, or assume any missing data.
-    - If there are multiple databases available (DuckDB, Elasticsearch):
-      first, ask the user which one he wants to use. DO NOT call any tools before
-      the user specifies his intent.
-    - If the user decides on an option, only use tools from this database,
-      do not switch over to another until the user specifies that he wants
-      to use a different one. You do not have to keep asking whether
-      the user wants to use the same database that he used before.
-    - If there is only one database available (DuckDB, Elasticsearch):
-      you can use the tools from this database without the user specifying it.
     """
     try:
         return get_trend_data_from_duckdb(record_type, interval, date_from, date_to, source_name)
@@ -296,15 +260,6 @@ def get_sleep_summary_duckdb(
     - "night" groups by the calendar day the segment started on, so a sleep session that
       starts late one evening and ends the next morning is grouped under the start day.
     - Do not guess, autofill, or assume any missing data.
-    - If there are multiple databases available (DuckDB, Elasticsearch):
-      first, ask the user which one he wants to use. DO NOT call any tools before
-      the user specifies his intent.
-    - If the user decides on an option, only use tools from this database,
-      do not switch over to another until the user specifies that he wants
-      to use a different one. You do not have to keep asking whether
-      the user wants to use the same database that he used before.
-    - If there is only one database available (DuckDB, Elasticsearch):
-      you can use the tools from this database without the user specifying it.
     """
     try:
         return get_sleep_summary_from_duckdb(date_from, date_to)
@@ -344,15 +299,6 @@ def get_blood_pressure_summary_duckdb(
       for the same timestamp/source — an unmatched systolic-only or
       diastolic-only row (e.g. a partial sync) is silently excluded.
     - Do not guess, autofill, or assume any missing data.
-    - If there are multiple databases available (DuckDB, Elasticsearch):
-      first, ask the user which one he wants to use. DO NOT call any tools before
-      the user specifies his intent.
-    - If the user decides on an option, only use tools from this database,
-      do not switch over to another until the user specifies that he wants
-      to use a different one. You do not have to keep asking whether
-      the user wants to use the same database that he used before.
-    - If there is only one database available (DuckDB, Elasticsearch):
-      you can use the tools from this database without the user specifying it.
     """
     try:
         return get_blood_pressure_summary_from_duckdb(date_from, date_to, source_name)
@@ -387,15 +333,6 @@ def search_values_duckdb(
       records with the value of "HKCategoryValueSleepAnalysisAsleepDeep"
     - The function automatically handles date filtering if date_from/date_to are provided
     - Do not guess, autofill, or assume any missing data.
-    - If there are multiple databases available (DuckDB, Elasticsearch):
-      first, ask the user which one he wants to use. DO NOT call any tools before
-      the user specifies his intent.
-    - If the user decides on an option, only use tools from this database,
-      do not switch over to another until the user specifies that he wants
-      to use a different one. You do not have to keep asking whether
-      the user wants to use the same database that he used before.
-    - If there is only one database available (DuckDB, Elasticsearch):
-      you can use the tools from this database without the user specifying it.
     """
     try:
         return search_values_from_duckdb(record_type, value, date_from, date_to)

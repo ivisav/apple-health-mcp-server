@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import AnyHttpUrl, SecretStr, field_validator
+from pydantic import AnyHttpUrl, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.utils.config_utils import EnvironmentType
@@ -26,11 +26,6 @@ class Settings(BaseSettings):
 
     LOGGING_CONF_FILE: str = "logging.conf"
 
-    ES_HOST: str = "localhost"
-    ES_PORT: int = 9200
-    ES_USER: str = "elastic"
-    ES_PASSWORD: SecretStr = SecretStr("elastic")
-    ES_INDEX: str = "apple_health_data"
 
     CH_DIRNAME: str = "applehealth.chdb"
     CH_DB_NAME: str = "applehealth"
@@ -83,6 +78,8 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(
         case_sensitive=True,
+        # keys no longer used (e.g. removed backends) may linger in config/.env
+        extra="ignore",
         env_file=str(Path(__file__).parent.parent / "config" / ".env"),
     )
 
