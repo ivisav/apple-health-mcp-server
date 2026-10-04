@@ -87,7 +87,7 @@ uv run scripts/import_baselines_note.py data/baselines.html             # safe t
 
 ```sh
 make test     # pytest with coverage
-make check    # ruff lint + format check + ty (mirrors CI)
+make check    # ruff lint + format check + ty
 make format   # auto-fix
 
 # dependency vulnerability audit

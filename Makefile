@@ -25,7 +25,7 @@ down:	## Kills running instance
 test:	## Run the tests.
 	$(UV) pytest -v --cov=app
 
-lint:  ## Check lint + format + types (run before pushing; mirrors CI)
+lint:  ## Check lint + format + types (run before pushing)
 	$(UV) ruff check
 	$(UV) ruff format --check
 	$(UV) ty check
