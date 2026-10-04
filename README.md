@@ -57,12 +57,14 @@ For Docker or Elasticsearch setups, see **[Getting Started](docs/getting-started
 | `get_blood_pressure_summary_duckdb` | Systolic + diastolic (+ heart rate) joined into one reading per timestamp |
 | `search_values_duckdb` | Exact value matches (including text) |
 | `log_fueling_event` / `search_fueling_events` / `delete_fueling_event` | Manual log of drinks, gels, bars, etc. |
+| `start_report_period` / `upsert_report_metrics` / `add_report_notes` / `get_report_history` / `get_report_trend` / `get_report_notes` | Weekly report history: per-period metrics and notes, week/month trends |
 
 XML (`*_xml_*`) and Elasticsearch (`*_es`) variants are also available. Full list: [MCP Tools](docs/mcp-tools.md).
 
 ## ✨ What's new in this fork
 
 - **Fueling log**: manual fueling events are stored in a separate writable DuckDB file (`LOGS_DUCKDB_FILENAME`). The importer never touches it, and every write is flushed to disk immediately.
+- **Report history**: weekly-report skills store per-period metrics and findings in a separate writable DuckDB file (`REPORTS_DUCKDB_FILENAME`) and read back compact history and week/month trends instead of re-parsing notes.
 - **Faster, safer import**: runs across multiple processes, rebuilds atomically (safe to repeat), `IMPORT_LOOKBACK_MONTHS` limits how far back it imports, and `make duckdb-reset` deletes the imported database.
 - **Query cache**: an in-process TTL + LRU cache for DuckDB reads, configured with `DUCKDB_QUERY_CACHE_*` in `config/.env.example`.
 - **Better filtering**: stats and trend tools accept a list of types plus source and date filters. Source names match even with Apple's curly apostrophes and non-breaking spaces (e.g. `Apple Watch`).
