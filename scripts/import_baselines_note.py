@@ -35,6 +35,7 @@ _ISO_TS = re.compile(
 _HEADER = re.compile(
     r"^##\s+(?:Period|Week) of\s+(?P<range>.+?)\s*\(reported\s+(?P<reported>[^)]+)\)\s*$"
 )
+_OTHER_HEADING = re.compile(r"^##+\s*(?P<title>.+?)\s*$")
 _SUPPLEMENT = re.compile(r"supplement for period\s+(?P<range>.+?)\s*\**\s*$", re.IGNORECASE)
 _EMPTY = {"", "—", "-", "–", "n/a", "na"}
 
@@ -206,6 +207,11 @@ class _Block:
     lines: list[str] = field(default_factory=list)
 
 
+def _norm(line: str) -> str:
+    """Strip; move a colon written inside a bold label outside it (`**Flags:**` → `**Flags**:`)."""
+    return re.sub(r"^\*\*([^*]+?):\*\*", r"**\1**:", line.strip())
+
+
 def _split_blocks(text: str) -> list[_Block]:
     blocks: list[_Block] = []
     for line in text.splitlines():
@@ -213,6 +219,10 @@ def _split_blocks(text: str) -> list[_Block]:
             blocks.append(_Block("period", m))
         elif line.lstrip().startswith(("#", "**")) and (m := _SUPPLEMENT.search(line)):
             blocks.append(_Block("supplement", m))
+        elif m := _OTHER_HEADING.match(line.strip()):
+            # Any other `##` heading ends the previous block, so its content never
+            # leaks into a period; parse_note reports it as skipped.
+            blocks.append(_Block("unknown", m))
         elif blocks:
             blocks[-1].lines.append(line)
     return blocks
@@ -222,7 +232,7 @@ def _fill(period: ParsedPeriod, lines: list[str], warnings: list[str]) -> None:
     mode = "metrics"
     findings_open = False
     for raw in lines:
-        line = raw.strip()
+        line = _norm(raw)
         if line.startswith("|"):
             findings_open = False
             cells = [c.strip() for c in line.strip("|").split("|")]
@@ -254,6 +264,9 @@ def _fill(period: ParsedPeriod, lines: list[str], warnings: list[str]) -> None:
         if line.startswith("**Validated interventions**"):
             mode, findings_open = "interventions", False
             continue
+        if mode == "flags" and (b := re.match(r"^(?:[-*•]|\d+[.)])\s+(.*)$", line)):
+            period.flags.append(b[1].strip())
+            continue
         mode = "metrics" if line.startswith("**") else mode
         if line.startswith("**Key findings**"):
             findings_open = True
@@ -264,12 +277,14 @@ def _fill(period: ParsedPeriod, lines: list[str], warnings: list[str]) -> None:
         if line.startswith("**Flags**"):
             findings_open = False
             rest = line.split(":", 1)[1].strip() if ":" in line else ""
-            if rest.lower().strip(" .") not in {"none", "—", ""}:
-                period.flags = [f.strip() for f in rest.split(",") if f.strip()]
+            if not rest:
+                mode = "flags"  # flags follow as a bullet list
+            elif rest.lower().strip(" .") not in {"none", "—"}:
+                period.flags = [f.strip() for f in re.split(r"[,;·]", rest) if f.strip()]
             continue
         if line.startswith("**Training load context**"):
             findings_open = False
-            for name, num in re.findall(r"\b(CTL|ATL|TSB)\b\s*[:=]?\s*([−\-]?[\d.]+)", line):
+            for name, num in re.findall(r"\b(CTL|ATL|TSB)\b\s*[:=]?\s*([+−\-]?[\d.]+)", line):
                 period.metrics.setdefault(
                     name.lower(), MetricInput(key=name.lower(), value=first_number(num))
                 )
@@ -289,13 +304,16 @@ def parse_note(text: str) -> ParsedNote:
         if block.kind == "supplement":
             supplements.append(block)
             continue
+        if block.kind == "unknown":
+            warnings.append(f"skipped unrecognised heading {block.header['title']!r}")
+            continue
         try:
             reported_text = block.header["reported"]
             fallback_year = int(y[0]) if (y := re.search(r"\d{4}", reported_text)) else None
             start, end = parse_date_range(block.header["range"], fallback_year)
             generated = _parse_reported(reported_text, end.year)
             days = float((end - start).days + 1)
-            for line in block.lines:
+            for line in map(_norm, block.lines):
                 if line.startswith("**Report generated**") and (m := _ISO_TS.search(line)):
                     generated = datetime.fromisoformat(m.group()).replace(tzinfo=None)
                 if line.startswith("**Period covered**"):

@@ -172,3 +172,55 @@ def test_no_blocks_returns_error_code(tmp_path: Path) -> None:
     src = tmp_path / "empty.md"
     src.write_text("# nothing here\n")
     assert imp.main([str(src)]) == 1
+
+
+VARIANTS = """# Weekly Health Baselines
+
+## Period of 2026-04-06 – 2026-04-12 (reported 2026-04-12)
+  **Report generated:** 2026-04-12T09:00:00 — this becomes CP_start for the next run
+  **Period covered:** 2026-04-06 – 2026-04-12 (7 days)
+
+| Metric | Value | Notes |
+|---|---|---|
+| HRV avg | 51.0 ms | |
+**Key findings:**
+- Something good
+**Flags:**
+- flag one
+- flag two
+**Training load context**: CTL 41.0 · ATL 38.0 · TSB +3.0
+
+## Some unrelated heading
+| HRV avg | 99.0 ms | |
+**Flags**: should not leak
+
+## Period of 2026-03-30 – 2026-04-05 (reported 2026-04-05)
+| HRV avg | 50.0 ms | |
+**Flags**: a; b · c
+"""
+
+
+def test_colon_inside_bold_and_indented_meta_lines() -> None:
+    p = imp.parse_note(VARIANTS).periods[0]
+    assert p.report_generated == datetime(2026, 4, 12, 9, 0)
+    assert p.days == 7.0
+    assert p.findings == ["Something good"]
+
+
+def test_flags_as_bullets_and_other_separators() -> None:
+    newer, older = imp.parse_note(VARIANTS).periods
+    assert newer.flags == ["flag one", "flag two"]
+    assert older.flags == ["a", "b", "c"]
+
+
+def test_positive_tsb_with_plus_sign() -> None:
+    p = imp.parse_note(VARIANTS).periods[0]
+    assert _values(p)["tsb"] == 3.0
+
+
+def test_unrecognised_heading_does_not_leak_into_previous_period() -> None:
+    parsed = imp.parse_note(VARIANTS)
+    newer = parsed.periods[0]
+    assert _values(newer)["hrv_avg_ms"] == 51.0
+    assert "should not leak" not in newer.flags
+    assert any("Some unrelated heading" in w for w in parsed.warnings)
