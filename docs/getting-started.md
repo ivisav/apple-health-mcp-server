@@ -49,7 +49,7 @@ Follow these steps to set up Apple Health MCP Server in your environment.
      server afterwards (or wait out the query-cache TTL) to pick up the new data.
      - `make duckdb` — rebuild from the current export.
      - `make duckdb-reset` — delete `data/applehealth.duckdb` and its `-wal`/temp files.
-       `data/manual_logs.duckdb` (runtime logs) is never touched.
+       `data/manual_logs.duckdb` (fueling log) and `data/health_reports.duckdb` (report history) are never touched.
    
 
 ## Configuration Files

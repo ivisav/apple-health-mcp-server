@@ -45,3 +45,21 @@ The Apple Health MCP Server provides a suite of tools for exploring, searching, 
 | `search_values_duckdb`          | Search for records with exactly matching values (including text).     |
 
 All tools are accessible via MCP-compatible clients and can be used with natural language or programmatic queries to explore and analyze your Apple Health data.
+
+## Report Store Tools (`report_store`)
+
+Per-period history written and read by the weekly-health-report skills, stored in a separate
+writable DuckDB file (`REPORTS_DUCKDB_FILENAME`, default `data/health_reports.duckdb`). Created
+empty on first use and never touched by the importer.
+
+| Tool | What it does |
+|------|--------------|
+| `start_report_period` | Register/fetch a reporting period (idempotent by `report_generated`); returns `period_id` + previous 2 periods |
+| `upsert_report_metrics` | Write metric values for a period (open set of snake_case keys; re-runs overwrite) |
+| `add_report_notes` | Store findings / flags / recommendations / validated interventions |
+| `get_report_history` | Last N periods × metrics, with average, change vs previous, all-time max/min |
+| `get_report_trend` | Week or month series (day-weighted) for chosen metrics |
+| `get_report_notes` | Notes across periods (filter by kind, subject, date; latest per subject) |
+
+One-time import of an existing "Weekly Health Baselines" note export:
+`uv run scripts/import_baselines_note.py <export.md> --dry-run`, then without `--dry-run`.

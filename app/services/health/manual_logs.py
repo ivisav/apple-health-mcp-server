@@ -1,9 +1,6 @@
-import contextlib
 import json
 import os
 import sys
-import threading
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -11,10 +8,7 @@ import duckdb
 
 from app.config import settings
 from app.schemas.manual_log import FuelingCategory
-from app.services.duckdb_client import DuckDBClient
-
-client = DuckDBClient(path=settings.LOGS_DUCKDB_FILENAME)
-_lock = threading.Lock()
+from app.services.health.writable_duckdb import WritableDuckDB
 
 FUELING_EVENTS_SCHEMA = """
     CREATE TABLE IF NOT EXISTS fueling_events (
@@ -35,21 +29,7 @@ FUELING_EVENTS_SCHEMA = """
 """
 
 
-@contextlib.contextmanager
-def _connect() -> Iterator[duckdb.DuckDBPyConnection]:
-    """Open a short-lived connection to the manual-logs DB and always close it
-    before returning. Each session/skill may run in its own container
-    sharing the same bind-mounted data/ dir, and DuckDB takes an exclusive
-    lock for as long as a read-write connection stays open — so the
-    connection must not outlive a single call, or other sessions can't
-    open the file until this one exits.
-    """
-    con = duckdb.connect(str(client.path))
-    try:
-        con.sql(FUELING_EVENTS_SCHEMA)
-        yield con
-    finally:
-        con.close()
+client = WritableDuckDB(path=settings.LOGS_DUCKDB_FILENAME, schema=FUELING_EVENTS_SCHEMA)
 
 
 def _json_mirror_path() -> Path:
@@ -67,7 +47,7 @@ def _write_json_mirror(con: duckdb.DuckDBPyConnection) -> None:
     # output is always strict, valid JSON. Going through pandas would turn NULL
     # DOUBLEs into NaN and emit invalid `NaN` tokens.
     cur = con.execute("SELECT * FROM fueling_events ORDER BY logged_at")
-    cols = [d[0] for d in cur.description]
+    cols = [d[0] for d in cur.description or []]
     rows = [dict(zip(cols, r, strict=True)) for r in cur.fetchall()]
     path = _json_mirror_path()
     tmp = path.with_suffix(".json.tmp")
@@ -82,7 +62,7 @@ def _persist(con: duckdb.DuckDBPyConnection) -> None:
     mirror. Manual-log volume is tiny and writes are rare, so the per-write
     CHECKPOINT cost is negligible.
     """
-    con.execute("CHECKPOINT")
+    client.checkpoint(con)
     try:
         _write_json_mirror(con)
     except Exception as e:  # noqa: BLE001 - mirror is best-effort
@@ -102,7 +82,7 @@ def log_fueling_event(
     notes: str | None = None,
     logged_at: str | None = None,
 ) -> dict[str, Any]:
-    with _lock, _connect() as con:
+    with client.lock, client.connect() as con:
         result = con.execute(
             """
             INSERT INTO fueling_events (
@@ -133,7 +113,7 @@ def log_fueling_event(
 
 
 def delete_fueling_event(id: str) -> dict[str, Any]:
-    with _lock, _connect() as con:
+    with client.lock, client.connect() as con:
         result = con.execute(
             "DELETE FROM fueling_events WHERE id = ?::UUID RETURNING *",
             [id],
@@ -151,7 +131,7 @@ def search_fueling_events(
     category: FuelingCategory | None = None,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
-    with _lock, _connect() as con:
+    with client.lock, client.connect() as con:
         query = "SELECT * FROM fueling_events WHERE 1=1"
         params: list[Any] = []
         if date_from:

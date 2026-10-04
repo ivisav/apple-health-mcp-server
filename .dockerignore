@@ -31,3 +31,10 @@ README.md
 *.parquet
 *.db
 *.duckdb
+
+# Personal / runtime data: bind-mounted at runtime, never baked into the image
+data/
+apple_health_export/
+skills/
+docs/superpowers/
+config/.env
