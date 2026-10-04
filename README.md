@@ -97,7 +97,7 @@ After a re-import, restart the MCP server or wait out the cache TTL to see the n
 
 ## 📚 Docs
 
-[Getting Started](docs/getting-started.md) · [Configuration](docs/configuration.md) · [MCP Tools](docs/mcp-tools.md) · [About & Architecture](docs/about.md) · [Roadmap](docs/roadmap.md)
+[Getting Started](docs/getting-started.md) · [Configuration](docs/configuration.md) · [MCP Tools](docs/mcp-tools.md) · [About & Architecture](docs/about.md)
 
 ## 🌱 Origins
 
