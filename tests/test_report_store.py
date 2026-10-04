@@ -399,3 +399,21 @@ def test_notes_keep_write_order_not_alphabetical() -> None:
 
     assert get_report_history(last_n=1)["notes"]["finding"] == ["Zeta went well", "Alpha concern"]
     assert [n["text"] for n in get_report_notes(kinds=["finding"])] == ["Zeta went well", "Alpha concern"]
+
+
+def test_history_rejects_empty_metrics_list() -> None:
+    with pytest.raises(ValueError, match="metrics"):
+        get_report_history(metrics=[])
+
+
+def test_latest_per_subject_tie_break_prefers_last_written() -> None:
+    pid = _period("2026-03-09", "2026-03-15", "2026-03-15T10:00:00")
+    add_report_notes(
+        pid, "validated_intervention",
+        [{"text": "first", "subject": "S", "noted_at": "2026-03-14"},
+         {"text": "second", "subject": "S", "noted_at": "2026-03-14"}],
+        "x", replace=False,
+    )
+    _metric(pid, "ctl", 40)
+    latest = get_report_notes(kinds=["validated_intervention"], latest_per_subject=True)
+    assert [n["text"] for n in latest] == ["second"]

@@ -76,6 +76,11 @@ def upsert_report_metrics(
 
     Returns upserted count and new_keys (keys never seen before and not
     canonical — check them for typos/synonyms).
+
+    Errors: inputs that break the schema (key not snake_case, missing value and
+    value_text, a non-number value such as "50 ms") are rejected as tool errors
+    before anything is written; other failures (unknown period_id, duplicate
+    keys) come back as {"error": ...}. Nothing is written in either case.
     """
     try:
         return svc.upsert_report_metrics(period_id, metrics, source_skill)

@@ -279,6 +279,8 @@ def get_report_history(
 ) -> dict[str, Any]:
     if not 1 <= last_n <= MAX_LAST_N:
         raise ValueError(f"last_n must be between 1 and {MAX_LAST_N}")
+    if metrics is not None and not metrics:
+        raise ValueError("metrics must not be empty; omit it to get every key")
     key_filter = " AND list_contains(?, m.key)" if metrics else ""
     key_params: list[Any] = [metrics] if metrics else []
 
@@ -451,7 +453,8 @@ def get_report_notes(
         where.append("n.subject IS NOT NULL")
         qualify = (
             "QUALIFY row_number() OVER "
-            "(PARTITION BY n.kind, lower(n.subject) ORDER BY n.created_at DESC) = 1"
+            "(PARTITION BY n.kind, lower(n.subject) "
+            "ORDER BY n.created_at DESC, n.position DESC) = 1"
         )
 
     with store.lock, store.connect() as con:

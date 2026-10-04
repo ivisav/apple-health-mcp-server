@@ -14,7 +14,7 @@ import calendar
 import re
 import sys
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -35,7 +35,7 @@ _ISO_TS = re.compile(
 _HEADER = re.compile(
     r"^##\s+(?:Period|Week) of\s+(?P<range>.+?)\s*\(reported\s+(?P<reported>[^)]+)\)\s*$"
 )
-_OTHER_HEADING = re.compile(r"^##+\s*(?P<title>.+?)\s*$")
+_OTHER_HEADING = re.compile(r"^##(?!#)\s*(?P<title>.+?)\s*$")  # ### and deeper stay inside a block
 _SUPPLEMENT = re.compile(r"supplement for period\s+(?P<range>.+?)\s*\**\s*$", re.IGNORECASE)
 _EMPTY = {"", "—", "-", "–", "n/a", "na"}
 
@@ -111,7 +111,8 @@ def parse_date_range(text: str, fallback_year: int | None) -> tuple[date, date]:
 def _parse_reported(text: str, year: int) -> datetime:
     if m := _ISO_TS.search(text):
         return datetime.fromisoformat(m.group()).replace(tzinfo=None)
-    d = _parse_one_date(text, year, None)
+    without_time = re.sub(r"\b\d{1,2}:\d{2}(?::\d{2})?\b", "", text)
+    d = _parse_one_date(without_time, year, None)
     return datetime(d.year, d.month, d.day)
 
 
@@ -132,7 +133,6 @@ def _row_metrics(label: str, value: str, notes: str) -> list[MetricInput] | None
         "sleep score": "sleep_score",
         "recovery status": "recovery_status",
         "steps avg/day": "steps_avg_day",
-        "water avg/day": "water_avg_ml_day",
         "rhr avg": "rhr_avg_bpm",
         "resp rate (sleep)": "resp_rate_sleep_brpm",
         "spo2 avg": "spo2_avg_pct",
@@ -155,16 +155,23 @@ def _row_metrics(label: str, value: str, notes: str) -> list[MetricInput] | None
     if label in simple:
         m = _num_metric(simple[label], value)
         return [m] if m else []
+    if label == "water avg/day":
+        n = first_number(value)
+        if n is None:
+            return []
+        if re.search(r"\d\s*(?:L|l|litres?|liters?)\b", value) and "ml" not in value.lower():
+            n *= 1000  # stored as mL
+        return [MetricInput(key="water_avg_ml_day", value=n)]
     if label == "hrv avg":
         if m := _num_metric("hrv_avg_ms", value):
             out.append(m)
-        if b := re.search(r"baseline\s*([\d.]+)", notes):
+        if b := re.search(r"baseline[:\s]*([\d.]+)", notes):
             out.append(MetricInput(key="hrv_baseline_ms", value=float(b[1])))
         return out
     if label == "body fat %":
         if m := _num_metric("body_fat_pct", value):
             out.append(m)
-        if b := re.search(r"LBM\s*([\d.]+)", notes):
+        if b := re.search(r"LBM[:\s]*([\d.]+)", notes):
             out.append(MetricInput(key="lbm_kg", value=float(b[1])))
         return out
     if label == "sleep consistency":
@@ -280,7 +287,8 @@ def _fill(period: ParsedPeriod, lines: list[str], warnings: list[str]) -> None:
             if not rest:
                 mode = "flags"  # flags follow as a bullet list
             elif rest.lower().strip(" .") not in {"none", "—"}:
-                period.flags = [f.strip() for f in re.split(r"[,;·]", rest) if f.strip()]
+                parts = [f.strip() for f in re.split(r"[,;·]", rest)]
+                period.flags = [f for f in parts if f.lower().strip(" .") not in {"", "none", "—"}]
             continue
         if line.startswith("**Training load context**"):
             findings_open = False
@@ -311,7 +319,10 @@ def parse_note(text: str) -> ParsedNote:
             reported_text = block.header["reported"]
             fallback_year = int(y[0]) if (y := re.search(r"\d{4}", reported_text)) else None
             start, end = parse_date_range(block.header["range"], fallback_year)
-            generated = _parse_reported(reported_text, end.year)
+            try:
+                generated: datetime | None = _parse_reported(reported_text, end.year)
+            except ValueError:
+                generated = None  # an in-block **Report generated** line may still provide it
             days = float((end - start).days + 1)
             for line in map(_norm, block.lines):
                 if line.startswith("**Report generated**") and (m := _ISO_TS.search(line)):
@@ -323,6 +334,8 @@ def parse_note(text: str) -> ParsedNote:
                         days = float(d[1])
                     else:
                         days = float((end - start).days + 1)
+            if generated is None:
+                raise ValueError(f"unrecognised report date {reported_text!r}")
         except (ValueError, KeyError) as e:
             warnings.append(f"skipped block {block.header.group(0)!r}: {e}")
             continue
@@ -344,6 +357,21 @@ def parse_note(text: str) -> ParsedNote:
             continue
         _fill(target, block.lines, warnings)
 
+    # report_generated is a period's identity in the store. Two blocks reported the same
+    # day without a time would collapse into one period, so nudge the older one (later in
+    # the file — the note is newest-first) back by a second per clash and say so.
+    seen: set[datetime] = set()
+    for p in periods:
+        original = p.report_generated
+        while p.report_generated in seen:
+            p.report_generated -= timedelta(seconds=1)
+        if p.report_generated != original:
+            warnings.append(
+                f"[{p.label}] duplicate report date {original.isoformat()}; "
+                f"stored as {p.report_generated.isoformat()}"
+            )
+        seen.add(p.report_generated)
+
     for p in periods:
         if not p.metrics:
             warnings.append(f"[{p.label}] no metrics parsed")
@@ -352,23 +380,32 @@ def parse_note(text: str) -> ParsedNote:
 
 def write_periods(parsed: ParsedNote) -> dict[str, Any]:
     written = 0
+    skipped: list[str] = []
     # oldest first so the store's creation order matches history
     for p in sorted(parsed.periods, key=lambda p: p.report_generated):
-        pid = start_report_period(
-            p.cp_start.isoformat(),
-            p.cp_end.isoformat(),
-            p.report_generated.isoformat(),
-            p.days,
-        )["period_id"]
+        stamp = p.report_generated.isoformat()
+        period = start_report_period(p.cp_start.isoformat(), p.cp_end.isoformat(), stamp, p.days)
+        if (period["cp_start"], period["cp_end"]) != (p.cp_start.isoformat(), p.cp_end.isoformat()):
+            skipped.append(
+                f"[{p.label}] store already has {period['cp_start']}→{period['cp_end']} "
+                f"for report date {stamp}; not overwritten"
+            )
+            continue
+        pid = period["period_id"]
         if p.metrics:
             upsert_report_metrics(pid, list(p.metrics.values()), IMPORT_SOURCE)
-        add_report_notes(pid, "finding", p.findings, IMPORT_SOURCE, replace=True)
-        add_report_notes(pid, "flag", p.flags, IMPORT_SOURCE, replace=True)
-        add_report_notes(
-            pid, "validated_intervention", p.interventions, IMPORT_SOURCE, replace=True
-        )
+        # Date imported notes to their period, not to the import run, so `since`
+        # filters and the ~8-week intervention cache see their real age.
+        findings = [NoteInput(text=t, noted_at=stamp) for t in p.findings]
+        flags = [NoteInput(text=t, noted_at=stamp) for t in p.flags]
+        interventions = [
+            n if n.noted_at else n.model_copy(update={"noted_at": stamp}) for n in p.interventions
+        ]
+        add_report_notes(pid, "finding", findings, IMPORT_SOURCE, replace=True)
+        add_report_notes(pid, "flag", flags, IMPORT_SOURCE, replace=True)
+        add_report_notes(pid, "validated_intervention", interventions, IMPORT_SOURCE, replace=True)
         written += 1
-    return {"periods": written}
+    return {"periods": written, "skipped": skipped}
 
 
 def _print(parsed: ParsedNote) -> None:
@@ -401,7 +438,10 @@ def main(argv: list[str] | None = None) -> int:
     if dry_run:
         print("\nDry run — nothing written.")
         return 0
-    print(f"\nImported {write_periods(parsed)['periods']} periods.")
+    result = write_periods(parsed)
+    for line in result["skipped"]:
+        print(f"  SKIPPED {line}")
+    print(f"\nImported {result['periods']} periods.")
     return 0
 
 

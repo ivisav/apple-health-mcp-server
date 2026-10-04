@@ -224,3 +224,75 @@ def test_unrecognised_heading_does_not_leak_into_previous_period() -> None:
     assert _values(newer)["hrv_avg_ms"] == 51.0
     assert "should not leak" not in newer.flags
     assert any("Some unrelated heading" in w for w in parsed.warnings)
+
+
+SAME_DAY = """## Period of 2026-03-09 – 2026-03-15 (reported 2026-03-16)
+| HRV avg | 50.0 ms | |
+**Key findings**: week A
+
+## Period of 2026-03-16 – 2026-03-16 (reported 2026-03-16)
+| HRV avg | 60.0 ms | |
+**Key findings**: week B
+"""
+
+
+def test_same_report_generated_keeps_both_periods_with_warning() -> None:
+    parsed = imp.parse_note(SAME_DAY)
+    assert len({p.report_generated for p in parsed.periods}) == 2
+    assert any("duplicate" in w for w in parsed.warnings)
+
+    imp.write_periods(parsed)
+    h = report_store.get_report_history(last_n=5)
+    assert sorted(p["cp_start"] for p in h["periods"]) == ["2026-03-09", "2026-03-16"]
+    assert sorted(v for v in h["metrics"]["hrv_avg_ms"]["values"]) == [50.0, 60.0]
+
+
+def test_write_refuses_period_that_conflicts_with_store() -> None:
+    report_store.start_report_period("2026-03-01", "2026-03-08", "2026-03-16T00:00:00")
+    parsed = imp.parse_note(SAME_DAY.split("\n\n")[0] + "\n")
+    result = imp.write_periods(parsed)
+    assert result["periods"] == 0
+    assert len(result["skipped"]) == 1
+
+
+def test_imported_notes_are_dated_to_their_period(tmp_path: Path) -> None:
+    src = tmp_path / "note.md"
+    src.write_text(NOTE)
+    assert imp.main([str(src)]) == 0
+    texts = {n["text"] for n in report_store.get_report_notes(since="2026-03-12")}
+    assert "First tracked week" not in texts  # legacy period reported 2026-03-09
+    assert "HRV up vs baseline" in texts
+    finding = report_store.get_report_notes(kinds=["finding"], subject=None)
+    assert {n["created_at"][:10] for n in finding} == {"2026-03-15", "2026-03-09"}
+
+
+SUBHEADINGS = """## Period of 2026-04-06 – 2026-04-12 (reported 2026-04-12)
+| HRV avg | 51.0 ms | baseline: 49.5 ms |
+| Body fat % | 21.0% | LBM: 70.0 kg |
+| Water avg/day | 2.1 L | |
+### Training
+**Training load context**: CTL 41.0 · ATL 38.0 · TSB 3.0
+**Flags**: low steps; none
+"""
+
+
+def test_level3_heading_stays_inside_block_and_colon_variants() -> None:
+    parsed = imp.parse_note(SUBHEADINGS)
+    v = _values(parsed.periods[0])
+    assert v["ctl"] == 41.0
+    assert v["hrv_baseline_ms"] == 49.5
+    assert v["lbm_kg"] == 70.0
+    assert v["water_avg_ml_day"] == 2100.0
+    assert parsed.periods[0].flags == ["low steps"]
+    assert not any("Training" in w for w in parsed.warnings)
+
+
+def test_in_block_report_generated_wins_over_unparseable_header_time() -> None:
+    text = """## Period of Mar 9 – 15, 2026 (reported Mar 15, 2026 18:30)
+**Report generated**: 2026-03-15T18:30:00
+| HRV avg | 50.0 ms | |
+"""
+    parsed = imp.parse_note(text)
+    assert [p.report_generated for p in parsed.periods] == [datetime(2026, 3, 15, 18, 30)]
+    header_only = imp.parse_note(text.replace("**Report generated**: 2026-03-15T18:30:00\n", ""))
+    assert [p.report_generated for p in header_only.periods] == [datetime(2026, 3, 15, 0, 0)]
