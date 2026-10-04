@@ -40,6 +40,7 @@ CORE_METRICS: dict[str, CoreMetric] = {
     "steps_avg_day": CoreMetric("steps/day", "higher_is_better"),
     "water_avg_ml_day": CoreMetric("mL/day", "higher_is_better"),
     "stand_h_day": CoreMetric("h/day", "higher_is_better"),
+    "stand_min_day": CoreMetric("min/day", "higher_is_better"),
     "other_activity": CoreMetric(None, "neutral"),
     "cycling_sessions": CoreMetric("rides", "neutral"),
     "total_km": CoreMetric("km", "neutral"),

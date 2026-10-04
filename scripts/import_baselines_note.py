@@ -11,6 +11,7 @@ upserted and imported notes replaced, so re-running after fixing the export is s
 """
 
 import calendar
+import html
 import re
 import sys
 from dataclasses import dataclass, field
@@ -112,7 +113,13 @@ def _parse_reported(text: str, year: int) -> datetime:
     if m := _ISO_TS.search(text):
         return datetime.fromisoformat(m.group()).replace(tzinfo=None)
     without_time = re.sub(r"\b\d{1,2}:\d{2}(?::\d{2})?\b", "", text)
-    d = _parse_one_date(without_time, year, None)
+    try:
+        d = _parse_one_date(without_time, year, None)
+    except ValueError:
+        first = re.search(r"[A-Za-z]{3}[a-z]*\.?\s+\d{1,2}(?:,?\s+\d{4})?", without_time)
+        if not first:
+            raise
+        d = _parse_one_date(first.group(), year, None)
     return datetime(d.year, d.month, d.day)
 
 
@@ -144,8 +151,14 @@ def _row_metrics(label: str, value: str, notes: str) -> list[MetricInput] | None
         "total elevation": "total_elev_m",
         "avg cadence": "avg_cadence_rpm",
         "stand hours avg": "stand_h_day",
+        "stand time avg": "stand_min_day",
+        "avg speed": "avg_speed_kmh",
+        "weekly km": "total_km",
         "calories/day": "calories_kcal_day",
         "protein/day": "protein_g_day",
+        "protein avg": "protein_g_day",
+        "protein": "protein_g_day",
+        "magnesium": "magnesium_mg_day",
         "magnesium/day": "magnesium_mg_day",
         "potassium/day": "potassium_mg_day",
         "rem avg": "rem_min",
@@ -155,7 +168,7 @@ def _row_metrics(label: str, value: str, notes: str) -> list[MetricInput] | None
     if label in simple:
         m = _num_metric(simple[label], value)
         return [m] if m else []
-    if label == "water avg/day":
+    if label in ("water avg/day", "hydration"):
         n = first_number(value)
         if n is None:
             return []
@@ -165,18 +178,18 @@ def _row_metrics(label: str, value: str, notes: str) -> list[MetricInput] | None
     if label == "hrv avg":
         if m := _num_metric("hrv_avg_ms", value):
             out.append(m)
-        if b := re.search(r"baseline[:\s]*([\d.]+)", notes):
+        if b := re.search(r"baseline[:\s]*(\d+(?:\.\d+)?)", notes):
             out.append(MetricInput(key="hrv_baseline_ms", value=float(b[1])))
         return out
     if label == "body fat %":
         if m := _num_metric("body_fat_pct", value):
             out.append(m)
-        if b := re.search(r"LBM[:\s]*([\d.]+)", notes):
+        if b := re.search(r"LBM[:\s]*(\d+(?:\.\d+)?)", notes):
             out.append(MetricInput(key="lbm_kg", value=float(b[1])))
         return out
     if label == "sleep consistency":
         out.append(MetricInput(key="sleep_consistency", value_text=value.strip()))
-        if b := re.search(r"([\d.]+)\s*min", notes):
+        if b := re.search(r"(\d+(?:\.\d+)?)\s*min", notes):
             out.append(MetricInput(key="sleep_consistency_stddev_min", value=float(b[1])))
         return out
     if label.startswith("deep sleep avg"):
@@ -187,7 +200,7 @@ def _row_metrics(label: str, value: str, notes: str) -> list[MetricInput] | None
             n = round(n / 1.65, 2)
         return [MetricInput(key="deep_sleep_raw_min", value=n)]
     if label == "blood pressure":
-        if bp := re.search(r"(\d+)\s*/\s*(\d+)", value):
+        if bp := re.search(r"(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)", value):
             out += [
                 MetricInput(key="bp_systolic_mmhg", value=float(bp[1])),
                 MetricInput(key="bp_diastolic_mmhg", value=float(bp[2])),
@@ -204,7 +217,18 @@ def _row_metrics(label: str, value: str, notes: str) -> list[MetricInput] | None
         return [MetricInput(key="other_activity", value_text=value.strip())]
     if label == "training status":
         return [MetricInput(key="training_status", value_text=value.strip())]
+    if label == "training load":
+        return _load_metrics(value)
     return None
+
+
+def _load_metrics(text: str) -> list[MetricInput]:
+    """CTL/ATL/TSB values from text like `CTL 40.0 · ATL 45.5 · TSB −5.5`."""
+    return [
+        MetricInput(key=name.lower(), value=n)
+        for name, num in re.findall(r"\b(CTL|ATL|TSB)\b\s*[:=]?\s*([+−\-]?[\d.]+)", text)
+        if (n := first_number(num)) is not None
+    ]
 
 
 @dataclass
@@ -214,9 +238,191 @@ class _Block:
     lines: list[str] = field(default_factory=list)
 
 
+_META_LABELS = (
+    "Report generated",
+    "Period covered",
+    "Key findings",
+    "Flags",
+    "Training load context",
+    "Validated interventions",
+)
+
+
 def _norm(line: str) -> str:
-    """Strip; move a colon written inside a bold label outside it (`**Flags:**` → `**Flags**:`)."""
-    return re.sub(r"^\*\*([^*]+?):\*\*", r"**\1**:", line.strip())
+    """
+    Strip; move a colon written inside a bold label outside it (`**Flags:**` → `**Flags**:`)
+    and bold a known label written plainly (`Report generated:` → `**Report generated**:`).
+    """
+    line = re.sub(r"^\*\*([^*]+?):\*\*", r"**\1**:", line.strip())
+    for label in _META_LABELS:
+        if line.startswith(f"{label}:") or line.startswith(f"{label} ("):
+            return f"**{label}**{line[len(label) :]}"
+    return line
+
+
+# --- Flat notes ----------------------------------------------------------------
+# Claude's Apple Notes writes store the whole note as one paragraph: headings,
+# labels and table rows run together. reflow_flat() rebuilds the line structure
+# the parser expects. Table rows are recovered by counting cells (the column count
+# comes from the header's |---| separator), which is exact even with empty cells.
+
+_TABLE_HEAD = re.compile(r"\|(?P<cells>(?:[^|\n]*\|){1,12}?)\s*(?P<sep>\|(?:\s*:?-{2,}:?\s*\|)+)")
+_BARE_HEAD = "Metric | Value | Notes"
+
+
+def _is_flat(text: str) -> bool:
+    headings = len(re.findall(r"(?<!#)##(?!#) ", text))
+    line_headings = len(re.findall(r"(?m)^\s*##(?!#) ", text))
+    return headings > line_headings
+
+
+def _reflow_piped_tables(s: str) -> str:
+    out: list[str] = []
+    pos = 0
+    while m := _TABLE_HEAD.search(s, pos):
+        n = m["sep"].count("|") - 1
+        head = [c.strip() for c in m["cells"].split("|")[:-1]]
+        if len(head) != n:
+            out.append(s[pos : m.end()])
+            pos = m.end()
+            continue
+        out.append(s[pos : m.start()])
+        out.append("\n| " + " | ".join(head) + " |\n|" + "---|" * n + "\n")
+        i = m.end()
+        while True:
+            j = i
+            while j < len(s) and s[j] == " ":
+                j += 1
+            if j >= len(s) or s[j] != "|":
+                break
+            cells: list[str] = []
+            k = j + 1
+            for _ in range(n):
+                nxt = s.find("|", k)
+                if nxt == -1:
+                    break
+                cells.append(s[k:nxt].strip())
+                k = nxt + 1
+            if len(cells) < n:
+                break
+            out.append("| " + " | ".join(cells) + " |\n")
+            i = k
+        pos = i
+    out.append(s[pos:])
+    return "".join(out)
+
+
+def _known_labels() -> list[str]:
+    probe = [
+        "sleep score",
+        "sleep consistency",
+        "recovery status",
+        "steps avg/day",
+        "water avg/day",
+        "hrv avg",
+        "rhr avg",
+        "resp rate (sleep)",
+        "spo2 avg",
+        "vo2 max",
+        "hr recovery 1-min",
+        "body weight",
+        "body fat %",
+        "cycling sessions",
+        "total km",
+        "total elevation",
+        "avg cadence",
+        "avg speed",
+        "other activity",
+        "stand hours avg",
+        "stand time avg",
+        "calories/day",
+        "protein/day",
+        "protein avg",
+        "protein",
+        "hydration",
+        "magnesium",
+        "caffeine",
+        "magnesium/day",
+        "potassium/day",
+        "alcohol",
+        "deep sleep avg (raw)",
+        "deep sleep avg",
+        "rem avg",
+        "nrem total avg",
+        "blood pressure",
+        "training status",
+        "training load",
+        "weekly km",
+    ]
+    return sorted(probe, key=len, reverse=True)
+
+
+def _split_label(chunk: str, guess: bool) -> tuple[str, str] | None:
+    """Split `previous row's notes NextLabel` → (notes, label), by known label or a guess."""
+    low = chunk.replace("₂", "2").lower()
+    for lab in _known_labels():
+        if low.endswith(lab) and (len(low) == len(lab) or low[-len(lab) - 1] == " "):
+            cut = len(chunk) - len(lab)
+            return chunk[:cut].strip(), chunk[cut:].strip()
+    m = re.search(r"(?:[.!?;)\]]|—)\s+([A-Z][^.!?;)\]—|]{0,40})$", chunk) if guess else None
+    if m and len(m[1].split()) <= 5:
+        return chunk[: m.start(1)].strip(), m[1].strip()
+    return None
+
+
+def _reflow_bare_table(line: str) -> list[str] | None:
+    """`Metric | Value | Notes L1 | V1 | N1 L2 | V2 | N2 …` (no outer pipes) → piped rows."""
+    if not line.startswith(_BARE_HEAD):
+        return None
+    parts = [c.strip() for c in line[len(_BARE_HEAD) :].split(" | ")]
+    if len(parts) < 2:
+        return None
+    rows = ["| Metric | Value | Notes |", "|---|---|---|"]
+    label, i = parts[0], 1
+    while i < len(parts):
+        value = parts[i]
+        rest = parts[i + 1 :]
+        if len(rest) <= 1:  # final row: value plus optional notes
+            rows.append(f"| {label} | {value} | {rest[0] if rest else ''} |")
+            break
+        found = None
+        # Prefer a known next label, letting notes contain " | " (merge up to 2 more parts);
+        # otherwise guess the label starts after the last sentence end in the notes.
+        for guess in (False, True):
+            for extra in range(1 if guess else 3):
+                if extra + 1 >= len(rest):
+                    break
+                split = _split_label(" | ".join(rest[: extra + 1]), guess)
+                if split:
+                    found = (split, extra)
+                    break
+            if found:
+                break
+        if found is None:
+            rows.append(f"| {label} | {value} | {rest[0]} |")
+            rows.append(f"| ?unsplit | {' | '.join(rest[1:])} |")
+            break
+        (notes, next_label), extra = found
+        rows.append(f"| {label} | {value} | {notes} |")
+        label, i = next_label, i + 2 + extra
+    return rows
+
+
+def reflow_flat(text: str) -> str:
+    s = " ".join(text.split())
+    s = re.sub(r"\s*(?=(?<!#)##(?!#) )", "\n\n", s)
+    s = re.sub(r"(##\s+(?:Period|Week) of [^\n()]*\(reported [^)\n]*\))\s*", r"\1\n", s)
+    # consume each **label** whole so opening/closing markers pair left to right
+    s = re.sub(r"\s*(\*\*[^*\n]{1,60}\*\*)", r"\n\1", s)
+    labels = "|".join(map(re.escape, _META_LABELS))
+    s = re.sub(rf"(?<=[^\s|])\s+(?=(?:{labels})(?::|\s\())", "\n", s)
+    s = re.sub(r"(?<=[^\s|])\s+(?=Metric \| Value \| Notes(?!\s*\|))", "\n", s)
+    s = _reflow_piped_tables(s)
+    lines: list[str] = []
+    for line in s.splitlines():
+        rows = _reflow_bare_table(line.strip())
+        lines.extend(rows if rows is not None else [line])
+    return "\n".join(lines)
 
 
 def _split_blocks(text: str) -> list[_Block]:
@@ -224,7 +430,9 @@ def _split_blocks(text: str) -> list[_Block]:
     for line in text.splitlines():
         if m := _HEADER.match(line.strip()):
             blocks.append(_Block("period", m))
-        elif line.lstrip().startswith(("#", "**")) and (m := _SUPPLEMENT.search(line)):
+        elif line.lstrip().startswith("#") and (m := _SUPPLEMENT.search(line)):
+            # only a heading starts a supplement block; an inline **… supplement for
+            # period …** label is part of the period it sits in
             blocks.append(_Block("supplement", m))
         elif m := _OTHER_HEADING.match(line.strip()):
             # Any other `##` heading ends the previous block, so its content never
@@ -233,6 +441,22 @@ def _split_blocks(text: str) -> list[_Block]:
         elif blocks:
             blocks[-1].lines.append(line)
     return blocks
+
+
+def _split_numbered(text: str) -> list[str]:
+    """`1. a 2. b 3. c` → [a, b, c]; numbers must run 1, 2, 3… so a stray `Oct 2.` isn't a split."""
+    if not re.match(r"1[.)]\s", text):
+        return [text]
+    starts: list[tuple[int, int]] = []
+    pos, n = 0, 1
+    while m := re.compile(rf"(?:^|\s){n}[.)]\s").search(text, pos):
+        starts.append((m.start(), m.end()))
+        pos, n = m.end(), n + 1
+    items = [
+        text[b : (starts[i + 1][0] if i + 1 < len(starts) else len(text))].strip()
+        for i, (_, b) in enumerate(starts)
+    ]
+    return [x for x in items if x]
 
 
 def _fill(period: ParsedPeriod, lines: list[str], warnings: list[str]) -> None:
@@ -279,7 +503,7 @@ def _fill(period: ParsedPeriod, lines: list[str], warnings: list[str]) -> None:
             findings_open = True
             rest = line.split(":", 1)[1].strip() if ":" in line else ""
             if rest:
-                period.findings.append(rest)
+                period.findings.extend(_split_numbered(rest))
             continue
         if line.startswith("**Flags**"):
             findings_open = False
@@ -287,15 +511,16 @@ def _fill(period: ParsedPeriod, lines: list[str], warnings: list[str]) -> None:
             if not rest:
                 mode = "flags"  # flags follow as a bullet list
             elif rest.lower().strip(" .") not in {"none", "—"}:
-                parts = [f.strip() for f in re.split(r"[,;·]", rest)]
+                # "·" and ";" separate flags; a comma does only when neither is used
+                # (flags themselves often contain commas).
+                pattern = r"[·;]" if re.search(r"[·;]", rest) else r","
+                parts = [f.strip() for f in re.split(pattern, rest)]
                 period.flags = [f for f in parts if f.lower().strip(" .") not in {"", "none", "—"}]
             continue
         if line.startswith("**Training load context**"):
             findings_open = False
-            for name, num in re.findall(r"\b(CTL|ATL|TSB)\b\s*[:=]?\s*([+−\-]?[\d.]+)", line):
-                period.metrics.setdefault(
-                    name.lower(), MetricInput(key=name.lower(), value=first_number(num))
-                )
+            for m in _load_metrics(line):
+                period.metrics.setdefault(m.key, m)
             continue
         if line.startswith("**"):
             findings_open = False
@@ -305,6 +530,8 @@ def _fill(period: ParsedPeriod, lines: list[str], warnings: list[str]) -> None:
 
 
 def parse_note(text: str) -> ParsedNote:
+    if _is_flat(text):
+        text = reflow_flat(text)
     warnings: list[str] = []
     periods: list[ParsedPeriod] = []
     supplements: list[_Block] = []
@@ -313,7 +540,9 @@ def parse_note(text: str) -> ParsedNote:
             supplements.append(block)
             continue
         if block.kind == "unknown":
-            warnings.append(f"skipped unrecognised heading {block.header['title']!r}")
+            title = block.header["title"]
+            title = title if len(title) <= 60 else title[:57] + "..."
+            warnings.append(f"skipped unrecognised heading {title!r}")
             continue
         try:
             reported_text = block.header["reported"]
@@ -330,7 +559,7 @@ def parse_note(text: str) -> ParsedNote:
                 if line.startswith("**Period covered**"):
                     covered = line.split(":", 1)[1]
                     start, end = parse_date_range(covered, end.year)
-                    if d := re.search(r"\(([\d.]+)\s*days?\)", covered):
+                    if d := re.search(r"\(([\d.]+)\s*days?\b", covered):
                         days = float(d[1])
                     else:
                         days = float((end - start).days + 1)
@@ -430,7 +659,11 @@ def main(argv: list[str] | None = None) -> int:
     if len(paths) != 1:
         print(__doc__)
         return 2
-    parsed = parse_note(Path(paths[0]).read_text(encoding="utf-8"))
+    raw = Path(paths[0]).read_text(encoding="utf-8")
+    if raw.lstrip().startswith("<"):  # Notes.app HTML body (osascript `body of note`)
+        raw = re.sub(r"<br\s*/?>|</(?:div|p|li|h\d)>", "\n", raw)
+        raw = html.unescape(re.sub(r"<[^>]+>", "", raw))
+    parsed = parse_note(raw)
     _print(parsed)
     if not parsed.periods:
         print("No period blocks found — nothing to import.")

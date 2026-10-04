@@ -296,3 +296,121 @@ def test_in_block_report_generated_wins_over_unparseable_header_time() -> None:
     assert [p.report_generated for p in parsed.periods] == [datetime(2026, 3, 15, 18, 30)]
     header_only = imp.parse_note(text.replace("**Report generated**: 2026-03-15T18:30:00\n", ""))
     assert [p.report_generated for p in header_only.periods] == [datetime(2026, 3, 15, 0, 0)]
+
+
+# Synthetic note in the flat, single-paragraph form Claude's Apple Notes writes
+# produce: every block, table row and label run together on one line.
+FLAT = (
+    "Weekly Health Baselines Historical reports. Newest entries at top. "
+    "## Period of Mar 9 – 15, 2026 (reported 2026-03-15, detail supplement added 2026-03-16) "
+    "**Report generated**: 2026-03-15T18:30:00+01:00 — this becomes CP_start for the next run "
+    "**Period covered**: 2026-03-09 – 2026-03-15 (6.5 days) "
+    "| Metric | Value | Notes | |--------|-------|-------| "
+    "| Sleep Score | 80/100 Good | composite | | HRV avg | 50.0 ms | baseline 48.5 ms | "
+    "| RHR avg | 58.0 bpm | | | Avg speed | 25.0 km/h | road | | Stand time avg | 70 min/day | | "
+    "**Key findings**: 1. HRV up vs baseline, sleep steady. 2. Weight down 0.5 kg. "
+    "**Flags**: Low steps (monitor) · Hydration thin, event day unlogged (trend) "
+    "**Training load context**: CTL 40.0 · ATL 45.5 · TSB -5.5 (as of 2026-03-14) "
+    "**Detail supplement** (detail v1.1, 2026-03-16): Fiber low on 3/6 days. "
+    "**Validated interventions** (cache): | Intervention | Last validated | Verdict | |---|---|---| "
+    "| Example timing | 2026-03-01 | supported — source A | "
+    "## Period of Mar 2 – Mar 8, 2026 (reported Mar 8, 2026) "
+    "Report generated: 2026-03-08T20:00:00+01:00 — this becomes CP_start "
+    "Period covered: 2026-03-02 – 2026-03-08 (7 days; one night missing) "
+    "Metric | Value | Notes Cycling sessions | 2, both indoor | ramp test "
+    "Training load | CTL 38.0 · TSB -2.0 | expected fatigue Weekly km | 60.0km | indoor "
+    "## Week of Feb 23–Mar 1, 2026 (reported Mar 1, corrected Mar 3) "
+    "Metric | Value | Notes HRV avg | 49.0 ms | ok "
+    "## FTP & Zone Update — confirmed Mar 1, 2026 - Ramp test done"
+)
+
+
+def test_flat_note_new_format_block() -> None:
+    parsed = imp.parse_note(FLAT)
+    assert len(parsed.periods) == 3
+    p = parsed.periods[0]
+    assert (p.cp_start, p.cp_end, p.days) == (date(2026, 3, 9), date(2026, 3, 15), 6.5)
+    assert p.report_generated == datetime(2026, 3, 15, 18, 30)
+    v = _values(p)
+    assert (v["sleep_score"], v["hrv_avg_ms"], v["hrv_baseline_ms"], v["rhr_avg_bpm"]) == (80.0, 50.0, 48.5, 58.0)
+    assert (v["avg_speed_kmh"], v["stand_min_day"]) == (25.0, 70.0)
+    assert (v["ctl"], v["atl"], v["tsb"]) == (40.0, 45.5, -5.5)
+    assert p.findings == ["HRV up vs baseline, sleep steady.", "Weight down 0.5 kg."]
+    assert p.flags == ["Low steps (monitor)", "Hydration thin, event day unlogged (trend)"]
+    assert [n.subject for n in p.interventions] == ["Example timing"]
+
+
+def test_flat_note_bare_tables_and_legacy_headers() -> None:
+    parsed = imp.parse_note(FLAT)
+    mid, old = parsed.periods[1], parsed.periods[2]
+    assert mid.report_generated == datetime(2026, 3, 8, 20, 0)
+    assert mid.days == 7.0
+    v = _values(mid)
+    assert (v["cycling_sessions"], v["ctl"], v["tsb"], v["total_km"]) == (2.0, 38.0, -2.0, 60.0)
+    assert (old.cp_start, old.cp_end) == (date(2026, 2, 23), date(2026, 3, 1))
+    assert old.report_generated == datetime(2026, 3, 1, 0, 0)
+    assert _values(old)["hrv_avg_ms"] == 49.0
+    assert any("FTP & Zone Update" in w for w in parsed.warnings)
+
+
+def test_reads_notes_html_body(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    src = tmp_path / "note.html"
+    src.write_text("<div>" + FLAT.replace("&", "&amp;") + "</div>")
+    assert imp.main([str(src), "--dry-run"]) == 0
+    assert "hrv_avg_ms = 50.0" in capsys.readouterr().out
+
+
+def test_number_regexes_need_a_digit() -> None:
+    assert [m.key for m in imp._row_metrics("hrv avg", "50 ms", "vs baseline.") or []] == ["hrv_avg_ms"]
+    assert [m.key for m in imp._row_metrics("body fat %", "20%", "LBM.") or []] == ["body_fat_pct"]
+    assert [m.key for m in imp._row_metrics("sleep consistency", "Fair", ". min") or []] == ["sleep_consistency"]
+
+
+def test_blood_pressure_with_decimals() -> None:
+    got = {m.key: m.value for m in imp._row_metrics("blood pressure", "117.6/70.0 avg", "11 readings") or []}
+    assert (got["bp_systolic_mmhg"], got["bp_diastolic_mmhg"]) == (117.6, 70.0)
+
+
+INLINE_SUPPLEMENT = (
+    "## Period of 2026-03-09 – 2026-03-15 (reported 2026-03-15) "
+    "| Metric | Value | Notes | |---|---|---| | HRV avg | 50.0 ms | | "
+    "**Recommend supplement for period Mar 9-15, 2026** (recommend, 2026-03-16): fired #6 · #18. "
+    "**Validated interventions** (cache): | Intervention | Last validated | Verdict | |---|---|---| "
+    "| Example timing | 2026-03-01 | supported | "
+    "## Period of 2026-03-02 – 2026-03-08 (reported 2026-03-08) | Metric | Value | Notes | |---|---|---| "
+    "| HRV avg | 49.0 ms | | "
+)
+
+
+def test_inline_bold_supplement_label_stays_in_its_period() -> None:
+    parsed = imp.parse_note(INLINE_SUPPLEMENT)
+    assert [n.subject for n in parsed.periods[0].interventions] == ["Example timing"]
+    assert not any("supplement" in w for w in parsed.warnings)
+
+
+def test_bare_table_rows_split_without_parity_and_unknown_labels() -> None:
+    line = (
+        "Metric | Value | Notes HRV avg | 57.6ms | strong signal. Mystery thing | 3 | x | y "
+        "RHR avg | 52.7bpm | ok Protein avg | 126g/day | 5 logged days"
+    )
+    rows = imp._reflow_bare_table(line)
+    assert rows is not None
+    labels = [r.split("|")[1].strip() for r in rows[2:]]
+    assert labels[0] == "HRV avg"
+    assert "Mystery thing" in labels
+    assert "RHR avg" in labels and "Protein avg" in labels
+    assert imp._row_metrics("protein avg", "126g/day", "")[0].key == "protein_g_day"
+
+
+def test_legacy_labels_split_and_map() -> None:
+    line = (
+        "Metric | Value | Notes Body fat % | 26.5% | 1 reading. Every dose early Caffeine | ~142mg/day | ok "
+        "Hydration | ~670mL/day | low Protein | ~70g/day | short Magnesium | 327mg/day | diet"
+    )
+    rows = imp._reflow_bare_table(line)
+    assert rows is not None
+    labels = [r.split("|")[1].strip() for r in rows[2:]]
+    assert labels == ["Body fat %", "Caffeine", "Hydration", "Protein", "Magnesium"]
+    keys = {lab: [m.key for m in imp._row_metrics(imp._label(lab), "1 x", "") or []]
+            for lab in ("Hydration", "Protein", "Magnesium")}
+    assert keys == {"Hydration": ["water_avg_ml_day"], "Protein": ["protein_g_day"], "Magnesium": ["magnesium_mg_day"]}
