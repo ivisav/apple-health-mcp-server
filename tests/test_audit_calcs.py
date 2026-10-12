@@ -105,3 +105,11 @@ def test_a3_join_requires_start_and_end_match(con) -> None:
     con.execute("INSERT INTO stats VALUES ('HKQuantityTypeIdentifierActiveEnergyBurned','2026-10-10 09:00:00','2026-10-10 11:00:00',999,NULL,NULL,NULL,'kcal')")
     rows = duckdb_queries.get_statistics_by_type_from_duckdb("HKWorkoutActivityTypeWalking")
     assert [r["stat_type"] for r in rows] == ["duration"]
+
+
+def test_a1_date_window_does_not_truncate_edge_night(con) -> None:
+    core = "HKCategoryValueSleepAnalysisAsleepCore"
+    _sleep(con, "2026-10-10 23:30:00", "2026-10-11 03:30:00", core)  # 240 min, spans midnight
+    rows = duckdb_queries.get_sleep_summary_from_duckdb(date_from="2026-10-11")
+    assert [(str(r["night"])[:10], r["total_minutes"]) for r in rows] == [("2026-10-11", 240)]
+    assert duckdb_queries.get_sleep_summary_from_duckdb(date_to="2026-10-10") == []

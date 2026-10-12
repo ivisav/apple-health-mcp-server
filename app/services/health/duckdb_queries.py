@@ -257,6 +257,8 @@ def get_sleep_summary_from_duckdb(
         params["date_from"] = sql_timestamp(date_from, "date_from")
     if date_to:
         params["date_to"] = sql_timestamp(date_to, "date_to")
+    # The segment filter is padded by a day each side so sessions at the window edges are
+    # complete; the window is then applied to the wake date.
     # Segments are chained into sessions (a gap > 90 min starts a new one) and each session
     # is labelled by the day it ENDS (wake date), so a night that begins before midnight is
     # not split across two calendar days.
@@ -265,8 +267,8 @@ def get_sleep_summary_from_duckdb(
         WITH seg AS (
             SELECT startDate, endDate, textValue AS stage FROM records
             WHERE type = 'HKCategoryTypeIdentifierSleepAnalysis'
-            {"AND startDate >= $date_from" if date_from else ""}
-            {"AND startDate <= $date_to" if date_to else ""}
+            {"AND startDate >= CAST($date_from AS TIMESTAMP) - INTERVAL 1 DAY" if date_from else ""}
+            {"AND startDate <= CAST($date_to AS TIMESTAMP) + INTERVAL 1 DAY" if date_to else ""}
         ),
         ordered AS (
             SELECT *, MAX(endDate) OVER (
@@ -283,6 +285,9 @@ def get_sleep_summary_from_duckdb(
         COUNT(*) AS segment_count,
         SUM(date_diff('minute', sess.startDate, sess.endDate)) AS total_minutes
         FROM sess JOIN wake USING (sid)
+        WHERE TRUE
+        {"AND wake.night >= DATE_TRUNC('day', CAST($date_from AS TIMESTAMP))" if date_from else ""}
+        {"AND wake.night <= CAST($date_to AS TIMESTAMP)" if date_to else ""}
         GROUP BY wake.night, sess.stage ORDER BY wake.night DESC, sess.stage
         """,
         params=params,
