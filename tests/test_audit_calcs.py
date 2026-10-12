@@ -68,9 +68,9 @@ def test_a2_value_aggregates_picks_average_for_non_cumulative_stats() -> None:
 def _hike(c) -> None:
     s, e = "2026-10-10 09:00:00", "2026-10-10 12:03:00"
     c.execute("INSERT INTO workouts VALUES ('HKWorkoutActivityTypeHiking',183.4,'min','Watch',?,?,?)", [s, e, e])
-    c.execute("INSERT INTO stats VALUES ('HKQuantityTypeIdentifierActiveEnergyBurned',?,?,600,NULL,NULL,NULL,'kcal')", [s, e])
-    c.execute("INSERT INTO stats VALUES ('HKQuantityTypeIdentifierDistanceWalkingRunning',?,?,9.1,NULL,NULL,NULL,'km')", [s, e])
-    c.execute("INSERT INTO stats VALUES ('HKQuantityTypeIdentifierHeartRate',?,?,NULL,121,158,84,'count/min')", [s, e])
+    c.execute("INSERT INTO stats VALUES ('HKQuantityTypeIdentifierActiveEnergyBurned',?,?,600,0,0,0,'kcal')", [s, e])
+    c.execute("INSERT INTO stats VALUES ('HKQuantityTypeIdentifierDistanceWalkingRunning',?,?,9.1,0,0,0,'km')", [s, e])
+    c.execute("INSERT INTO stats VALUES ('HKQuantityTypeIdentifierHeartRate',?,?,0,121,158,84,'count/min')", [s, e])
 
 
 def test_a2_heart_rate_workout_stat_is_not_zero(con) -> None:
@@ -102,7 +102,7 @@ def test_a3_join_requires_start_and_end_match(con) -> None:
     assert "workouts.endDate = stats.endDate" in join_query
     con.execute("INSERT INTO workouts VALUES ('HKWorkoutActivityTypeWalking',30,'min','W','2026-10-10 09:00:00','2026-10-10 09:30:00','2026-10-10 09:30:00')")
     # same start, different end -> a different (overlapping) workout's stat; must not attach
-    con.execute("INSERT INTO stats VALUES ('HKQuantityTypeIdentifierActiveEnergyBurned','2026-10-10 09:00:00','2026-10-10 11:00:00',999,NULL,NULL,NULL,'kcal')")
+    con.execute("INSERT INTO stats VALUES ('HKQuantityTypeIdentifierActiveEnergyBurned','2026-10-10 09:00:00','2026-10-10 11:00:00',999,0,0,0,'kcal')")
     rows = duckdb_queries.get_statistics_by_type_from_duckdb("HKWorkoutActivityTypeWalking")
     assert [r["stat_type"] for r in rows] == ["duration"]
 
