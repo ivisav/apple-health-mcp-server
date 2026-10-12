@@ -417,3 +417,13 @@ def test_latest_per_subject_tie_break_prefers_last_written() -> None:
     _metric(pid, "ctl", 40)
     latest = get_report_notes(kinds=["validated_intervention"], latest_per_subject=True)
     assert [n["text"] for n in latest] == ["second"]
+
+
+def test_history_avg_last_n_is_weighted_by_period_days() -> None:
+    p1 = start_report_period("2026-03-01", "2026-03-07", "2026-03-07T10:00:00")["period_id"]  # 7 d
+    p2 = start_report_period("2026-03-08", "2026-03-09", "2026-03-09T10:00:00")["period_id"]  # 2 d
+    _metric(p1, "weight_avg_kg", 100.0)
+    _metric(p2, "weight_avg_kg", 91.0)
+    h = get_report_history(["weight_avg_kg"], last_n=2)
+    # (100*7 + 91*2) / 9 = 98.0, not the unweighted 95.5
+    assert h["metrics"]["weight_avg_kg"]["avg_last_n"] == 98.0

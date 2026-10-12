@@ -15,6 +15,9 @@ from app.services.duckdb_client import DuckDBClient
 from app.services.health.sql_helpers import (
     fill_query,
     get_table,
+    STAT_MAX,
+    STAT_MIN,
+    STAT_VALUE,
     join_query,
     join_string,
     normalized_source,
@@ -106,6 +109,42 @@ def get_statistics_by_type_from_duckdb(
 
     src_filter = _source_name_filter(source_name)
 
+    if table == "workouts":
+        # Duration comes from the workouts table alone: joining to stats first would repeat
+        # each workout once per stat row (and label minutes with the stat's unit).
+        results.append(
+            _get_con().sql(
+                f"""
+                    SELECT workouts.type, 'duration' AS stat_type, COUNT(*) AS count,
+                    AVG(duration) AS average, SUM(duration) AS sum, MIN(duration) AS min,
+                    MAX(duration) AS max, durationUnit AS unit FROM workouts
+                    WHERE {type_filter(table, record_type)}
+                    {src_filter}
+                    {f"AND workouts.startDate >= $date_from" if date_from else ""}
+                    {f"AND workouts.startDate <= $date_to" if date_to else ""}
+                    GROUP BY workouts.type, durationUnit
+                    """,
+                params=query_params,
+            ),
+        )
+        results.append(
+            _get_con().sql(
+                f"""
+                    SELECT workouts.type, stats.type AS stat_type, COUNT(*) AS count,
+                    AVG({STAT_VALUE}) AS average,
+                    SUM(stats.sum) AS sum, MIN({STAT_MIN}) AS min,
+                    MAX({STAT_MAX}) AS max, unit FROM workouts {join_clause}
+                    WHERE {type_filter(table, record_type)}
+                    {src_filter}
+                    {f"AND workouts.startDate >= $date_from" if date_from else ""}
+                    {f"AND workouts.startDate <= $date_to" if date_to else ""}
+                    GROUP BY workouts.type, stats.type, unit
+                    """,
+                params=query_params,
+            ),
+        )
+        return client.format_response(results)
+
     value = values[0]
     for value in values:
         results.append(
@@ -150,6 +189,43 @@ def get_trend_data_from_duckdb(
 
     src_filter = _source_name_filter(source_name)
 
+    if table == "workouts":
+        results.append(
+            _get_con().sql(
+                f"""
+            SELECT workouts.type, 'duration' AS stat_type, sourceName,
+            time_bucket(INTERVAL '1 {interval}', workouts.startDate) AS interval,
+            AVG(duration) AS average, SUM(duration) AS sum,
+            MIN(duration) AS min, MAX(duration) AS max, COUNT(*) AS count,
+            durationUnit AS unit FROM workouts
+            WHERE {type_filter(table, record_type)}
+            {src_filter}
+            {f"AND workouts.startDate >= $date_from" if date_from else ""}
+            {f"AND workouts.startDate <= $date_to" if date_to else ""}
+            GROUP BY interval, workouts.type, sourceName, durationUnit ORDER BY interval ASC
+        """,
+                params=query_params,
+            ),
+        )
+        results.append(
+            _get_con().sql(
+                f"""
+            SELECT workouts.type, stats.type AS stat_type, sourceName,
+            time_bucket(INTERVAL '1 {interval}', workouts.startDate) AS interval,
+            AVG({STAT_VALUE}) AS average, SUM(stats.sum) AS sum,
+            MIN({STAT_MIN}) AS min, MAX({STAT_MAX}) AS max, COUNT(*) AS count,
+            unit FROM workouts {join_clause}
+            WHERE {type_filter(table, record_type)}
+            {src_filter}
+            {f"AND workouts.startDate >= $date_from" if date_from else ""}
+            {f"AND workouts.startDate <= $date_to" if date_to else ""}
+            GROUP BY interval, workouts.type, stats.type, sourceName, unit ORDER BY interval ASC
+        """,
+                params=query_params,
+            ),
+        )
+        return client.format_response(results)
+
     for value in values:
         results.append(
             _get_con().sql(
@@ -181,15 +257,33 @@ def get_sleep_summary_from_duckdb(
         params["date_from"] = sql_timestamp(date_from, "date_from")
     if date_to:
         params["date_to"] = sql_timestamp(date_to, "date_to")
+    # Segments are chained into sessions (a gap > 90 min starts a new one) and each session
+    # is labelled by the day it ENDS (wake date), so a night that begins before midnight is
+    # not split across two calendar days.
     result = _get_con().sql(
         f"""
-        SELECT DATE_TRUNC('day', startDate) AS night, textValue AS stage,
+        WITH seg AS (
+            SELECT startDate, endDate, textValue AS stage FROM records
+            WHERE type = 'HKCategoryTypeIdentifierSleepAnalysis'
+            {"AND startDate >= $date_from" if date_from else ""}
+            {"AND startDate <= $date_to" if date_to else ""}
+        ),
+        ordered AS (
+            SELECT *, MAX(endDate) OVER (
+                ORDER BY startDate, endDate ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+            ) AS prev_end FROM seg
+        ),
+        sess AS (
+            SELECT *, SUM(CASE WHEN prev_end IS NULL
+                    OR date_diff('minute', prev_end, startDate) > 90 THEN 1 ELSE 0 END)
+                OVER (ORDER BY startDate, endDate) AS sid FROM ordered
+        ),
+        wake AS (SELECT sid, DATE_TRUNC('day', MAX(endDate)) AS night FROM sess GROUP BY sid)
+        SELECT wake.night AS night, sess.stage AS stage,
         COUNT(*) AS segment_count,
-        SUM(date_diff('minute', startDate, endDate)) AS total_minutes
-        FROM records WHERE type = 'HKCategoryTypeIdentifierSleepAnalysis'
-        {"AND startDate >= $date_from" if date_from else ""}
-        {"AND startDate <= $date_to" if date_to else ""}
-        GROUP BY night, stage ORDER BY night DESC, stage
+        SUM(date_diff('minute', sess.startDate, sess.endDate)) AS total_minutes
+        FROM sess JOIN wake USING (sid)
+        GROUP BY wake.night, sess.stage ORDER BY wake.night DESC, sess.stage
         """,
         params=params,
     )

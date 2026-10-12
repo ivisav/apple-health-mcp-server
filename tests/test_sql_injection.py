@@ -104,7 +104,7 @@ def test_fill_query_uses_workout_duration_bounds_and_spaces_order_by() -> None:
         )
     )
     assert "duration >= 30.0" in query
-    assert "sum >= 100.0" in query
+    assert "COALESCE(stats.sum, stats.average) >= 100.0" in query  # per-stat-type column (A2)
     assert " ORDER BY " in query or "ORDER BY workouts" in query.replace("\n", " ")
 
 

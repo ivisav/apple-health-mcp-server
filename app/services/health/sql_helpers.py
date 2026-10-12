@@ -5,7 +5,17 @@ from typing import Any
 
 from app.schemas.record import HealthRecordSearchParams
 
-join_query: str = "INNER JOIN stats ON workouts.startDate = stats.startDate"
+join_query: str = (
+    "INNER JOIN stats ON workouts.startDate = stats.startDate "
+    "AND workouts.endDate = stats.endDate"
+)
+
+# Workout statistics keep their number in a different column per stat type: cumulative
+# types (energy, distance, steps) fill ``sum``; HeartRate-like types fill
+# ``average``/``maximum``/``minimum`` and leave ``sum`` NULL (reading ``sum`` gives 0/NULL).
+STAT_VALUE = "COALESCE(stats.sum, stats.average)"
+STAT_MIN = "COALESCE(stats.minimum, stats.sum)"
+STAT_MAX = "COALESCE(stats.maximum, stats.sum)"
 
 # Tool arguments come from an LLM and may carry injected text. Every value that is
 # spliced into SQL below goes through one of these validators first, so it can never
@@ -57,8 +67,11 @@ def join_string(table: str) -> str:
 
 
 def value_aggregates(table: str) -> list[str]:
+    """Value expression(s) to aggregate. For workouts/stats this is the per-stat-type
+    column pick (see STAT_VALUE); workout *duration* is aggregated separately, from the
+    workouts table alone, so the join never duplicates it."""
     if table in ["workouts", "stats"]:
-        return ["duration", "sum"]
+        return [STAT_VALUE]
     return ["value"]
 
 
@@ -104,7 +117,7 @@ def get_value_type(table: str | None) -> str:
         case "records":
             return "value"
         case "workouts" | "stats":
-            return "sum"
+            return STAT_VALUE
         case _:
             return "value"
 
