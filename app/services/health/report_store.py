@@ -347,12 +347,20 @@ def get_report_history(
         entry["unit"] = entry["unit"] or unit
     ext = {k: (mx, mx_end, mn, mn_end) for k, mx, mx_end, mn, mn_end in extremes}
     for key, entry in table.items():
-        nums = [n for n in (_num(v) for v in entry["values"]) if n is not None]
+        weighted = [
+            (n, float(periods[i][4]))
+            for i, n in enumerate(_num(v) for v in entry["values"])
+            if n is not None
+        ]
         latest = _num(entry["values"][0])
         prev = _num(entry["values"][1]) if len(ids) > 1 else None
         core = CORE_METRICS.get(key)
         entry["direction"] = core.direction if core else "unknown"
-        entry["avg_last_n"] = round(sum(nums) / len(nums), 3) if nums else None
+        entry["avg_last_n"] = (
+            round(sum(n * w for n, w in weighted) / sum(w for _, w in weighted), 3)
+            if weighted
+            else None
+        )
         entry["delta_vs_prev"] = (
             round(latest - prev, 3) if latest is not None and prev is not None else None
         )
